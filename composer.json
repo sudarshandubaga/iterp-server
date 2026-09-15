@@ -1,0 +1,20 @@
+{
+    "name": "iterp/server",
+    "description": "Framework-free PHP 8.2 + MySQL REST API for the Iterp application.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1",
+        "ext-pdo": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Iterp\\": "src/"
+        }
+    },
+    "scripts": {
+        "migrate": "php scripts/migrate.php",
+        "seed": "php scripts/seed.php",
+        "serve": "php scripts/serve.php"
+    }
+}

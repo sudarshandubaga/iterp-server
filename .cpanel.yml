@@ -1,0 +1,5 @@
+---
+deployment:
+  tasks:
+    - export DEPLOY_PATH=/home1/rudrarmq/iterp.xpertcoders.in
+    - /bin/cp -R * $DEPLOY_PATH
