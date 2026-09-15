@@ -1,0 +1,87 @@
+# ==============================================================================
+# iTERP Production Apache Configuration (.htaccess)
+# ==============================================================================
+
+# Disable directory browsing & enable symbolic links
+Options -Indexes +FollowSymLinks
+
+# Set default directory index
+DirectoryIndex index.php public/index.php
+
+# ------------------------------------------------------------------------------
+# 1. Security: Block Access to Sensitive Files & Folders
+# ------------------------------------------------------------------------------
+
+# Block access to all dot-files (.env, .git, .cpanel.yml, .gitignore, etc.)
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+    <FilesMatch "(^#.*#|\.(bak|config|dist|fla|inc|ini|log|psd|sh|sql|sw[op]|env|example|yml|yaml|json|lock|md))$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+    <FilesMatch "(^#.*#|\.(bak|config|dist|fla|inc|ini|log|psd|sh|sql|sw[op]|env|example|yml|yaml|json|lock|md))$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+# ------------------------------------------------------------------------------
+# 2. Mod_Rewrite Rules (Routing into /public)
+# ------------------------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block direct HTTP access to internal server directories & bootstrap file
+    RewriteRule ^(config|src|routes|resources|storage|scripts|bootstrap\.php) - [F,L,NC]
+
+    # Pass Authorization Header to PHP (Crucial for JWT Bearer Tokens in cPanel FastCGI / PHP-FPM)
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Canonicalize URLs: remove /public/ from browser request if typed directly
+    RewriteCond %{THE_REQUEST} \s/public/([^\s?]*) [NC]
+    RewriteRule ^public/(.*)$ /$1 [R=301,L,NE]
+
+    # If the requested file or folder exists inside public/, serve it directly (e.g. uploads, assets)
+    RewriteCond %{DOCUMENT_ROOT}/public/$1 -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/public/$1 -d
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    # If the request is not already targeting public/, route through public/
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    # Route all non-existing files/folders to public/index.php front-controller
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ public/index.php [L,QSA]
+</IfModule>
+
+# ------------------------------------------------------------------------------
+# 3. Security Headers
+# ------------------------------------------------------------------------------
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ------------------------------------------------------------------------------
+# 4. Gzip / Deflate Compression
+# ------------------------------------------------------------------------------
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE application/json
+    AddOutputFilterByType DEFLATE application/javascript
+    AddOutputFilterByType DEFLATE text/css
+    AddOutputFilterByType DEFLATE text/plain
+    AddOutputFilterByType DEFLATE text/html
+    AddOutputFilterByType DEFLATE text/xml
+</IfModule>
