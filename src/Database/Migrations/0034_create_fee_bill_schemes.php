@@ -7,21 +7,24 @@ namespace Iterp\Database\Migrations;
 use Iterp\Core\Migration;
 
 /**
- * fee_bill_schemes and fee_bill_scheme_amounts tables.
+ * fee_bill_schemes, fee_bill_scheme_slabs, and fee_bill_scheme_amounts tables.
  *
- * Manages 2 tables:
  * 1. fee_bill_schemes:
- *    - name: Scheme title (e.g. Regular Installments 2026-27)
- *    - slab: Slab frequency or count (e.g. Quarterly (4 Slabs), Monthly (12 Slabs), 4 Slabs)
- *    - session_id: Academic session (FK to academic_years)
- *    - firm_id: Firm/organization (FK to firms)
- * 2. fee_bill_scheme_amounts (separate table):
- *    - fee_bill_scheme_id: Parent scheme reference
- *    - slab_no: Sequential slab number (1, 2, 3...)
- *    - slab_name: Label (e.g. Slab 1 / April, Quarter 1, Installment 1)
- *    - fee_head_id: Optional fee head breakdown
- *    - amount: Decimal amount for this slab
- *    - due_date: Due date for this installment
+ *    - firm_id
+ *    - session_id
+ *    - name
+ *    - slab (numeric: count of slabs)
+ *    - description
+ *
+ * 2. fee_bill_scheme_slabs:
+ *    - fee_bill_scheme_id
+ *    - slab_no
+ *    - due_date
+ *
+ * 3. fee_bill_scheme_amounts:
+ *    - fee_bill_scheme_slab_id
+ *    - fee_head_id
+ *    - amount
  */
 class CreateFeeBillSchemesTable extends Migration
 {
@@ -33,7 +36,7 @@ class CreateFeeBillSchemesTable extends Migration
                 firm_id      BIGINT UNSIGNED NULL DEFAULT NULL,
                 session_id   BIGINT UNSIGNED NULL DEFAULT NULL,
                 name         VARCHAR(255) NOT NULL,
-                slab         VARCHAR(100) NOT NULL,
+                slab         INT NOT NULL DEFAULT 1,
                 description  TEXT NULL DEFAULT NULL,
                 created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -49,21 +52,33 @@ class CreateFeeBillSchemesTable extends Migration
         );
 
         $this->schema(
-            'CREATE TABLE IF NOT EXISTS fee_bill_scheme_amounts (
+            'CREATE TABLE IF NOT EXISTS fee_bill_scheme_slabs (
                 id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 fee_bill_scheme_id  BIGINT UNSIGNED NOT NULL,
                 slab_no             INT NOT NULL DEFAULT 1,
-                slab_name           VARCHAR(150) NOT NULL,
-                fee_head_id         BIGINT UNSIGNED NULL DEFAULT NULL,
-                amount              DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
                 due_date            DATE NULL DEFAULT NULL,
                 created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+                CONSTRAINT fk_fbs_slabs_scheme FOREIGN KEY (fee_bill_scheme_id) REFERENCES fee_bill_schemes (id) ON DELETE CASCADE,
+                INDEX idx_fbs_slabs_scheme (fee_bill_scheme_id),
+                INDEX idx_fbs_slabs_no (slab_no)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+
+        $this->schema(
+            'CREATE TABLE IF NOT EXISTS fee_bill_scheme_amounts (
+                id                       BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                fee_bill_scheme_slab_id  BIGINT UNSIGNED NOT NULL,
+                fee_head_id              BIGINT UNSIGNED NULL DEFAULT NULL,
+                amount                   DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+                created_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 
-                CONSTRAINT fk_fbs_amounts_scheme FOREIGN KEY (fee_bill_scheme_id) REFERENCES fee_bill_schemes (id) ON DELETE CASCADE,
-                CONSTRAINT fk_fbs_amounts_head FOREIGN KEY (fee_head_id) REFERENCES fee_heads (id) ON DELETE SET NULL,
-                INDEX idx_fbs_amounts_scheme (fee_bill_scheme_id),
-                INDEX idx_fbs_amounts_head (fee_head_id)
+                CONSTRAINT fk_fbs_amt_slab FOREIGN KEY (fee_bill_scheme_slab_id) REFERENCES fee_bill_scheme_slabs (id) ON DELETE CASCADE,
+                CONSTRAINT fk_fbs_amt_head FOREIGN KEY (fee_head_id) REFERENCES fee_heads (id) ON DELETE SET NULL,
+                INDEX idx_fbs_amt_slab (fee_bill_scheme_slab_id),
+                INDEX idx_fbs_amt_head (fee_head_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
     }
@@ -71,6 +86,7 @@ class CreateFeeBillSchemesTable extends Migration
     public function down(): void
     {
         $this->schema('DROP TABLE IF EXISTS fee_bill_scheme_amounts');
+        $this->schema('DROP TABLE IF EXISTS fee_bill_scheme_slabs');
         $this->schema('DROP TABLE IF EXISTS fee_bill_schemes');
     }
 }

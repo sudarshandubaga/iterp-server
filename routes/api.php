@@ -95,6 +95,8 @@ $resources = [
     // Fees
     'fee-heads'              => 'FeeHeadController',
     'fee-bill-schemes'       => 'FeeBillSchemeController',
+    'fee-bill-scheme-slabs'  => 'FeeBillSchemeSlabController',
+    'fee-bill-scheme-amounts'=> 'FeeBillSchemeAmountController',
     'fee-concessions'        => 'FeeConcessionController',
     'concessions'            => 'FeeConcessionController',
 ];

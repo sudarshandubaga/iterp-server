@@ -15,11 +15,8 @@ class FeeBillSchemeAmount extends Model
     protected string $primaryKey = 'id';
 
     protected array $fillable = [
-        'fee_bill_scheme_id',
-        'slab_no',
-        'slab_name',
+        'fee_bill_scheme_slab_id',
         'fee_head_id',
         'amount',
-        'due_date',
     ];
 }

@@ -9,24 +9,27 @@ use Iterp\Core\Request;
 use Iterp\Core\Response;
 use Iterp\Core\Validator;
 use Iterp\Models\FeeBillScheme;
+use Iterp\Models\FeeBillSchemeSlab;
 use Iterp\Models\FeeBillSchemeAmount;
 use Throwable;
 
 /**
- * Controller for Fee Bill Scheme (manages 2 tables).
+ * Controller for Fee Bill Scheme (manages 3 tables in hierarchy).
  *
  * 1. Parent: fee_bill_schemes
- *    - name
- *    - slab
- *    - session_id
  *    - firm_id
- * 2. Child: fee_bill_scheme_amounts
+ *    - session_id
+ *    - name
+ *    - slab (numeric: count of slabs)
+ *    - description
+ * 2. Child: fee_bill_scheme_slabs
  *    - fee_bill_scheme_id
  *    - slab_no
- *    - slab_name
+ *    - due_date
+ * 3. Grandchild: fee_bill_scheme_amounts
+ *    - fee_bill_scheme_slab_id
  *    - fee_head_id
  *    - amount
- *    - due_date
  */
 class FeeBillSchemeController
 {
@@ -46,10 +49,15 @@ class FeeBillSchemeController
             $query->where('session_id', (int) $sessionId);
         }
 
-        // Search by name or slab
+        // Search by name or description
         $search = $request->query('search');
         if ($search !== null && trim((string) $search) !== '') {
-            $query->search(['name', 'slab'], trim((string) $search));
+            $term = trim((string) $search);
+            if (is_numeric($term)) {
+                $query->where('slab', (int) $term);
+            } else {
+                $query->search(['name', 'description'], $term);
+            }
         }
 
         $query->orderBy('id', 'DESC');
@@ -102,13 +110,19 @@ class FeeBillSchemeController
 
         $validator = Validator::make($data, [
             'name'       => 'required|string|max:255',
-            'slab'       => 'required|string|max:100',
+            'slab'       => 'required|integer|min:1',
             'session_id' => 'nullable|integer|exists:academic_years,id',
             'firm_id'    => 'nullable|integer|exists:firms,id',
         ]);
 
         if ($validator->fails()) {
             return Response::error('Validation failed.', 422, $validator->errors());
+        }
+
+        $slabs = $this->normalizeSlabsData($data);
+        $slabCount = (int) $data['slab'];
+        if ($slabCount <= 0 && $slabs !== []) {
+            $slabCount = count($slabs);
         }
 
         $pdo = Database::pdo();
@@ -118,7 +132,7 @@ class FeeBillSchemeController
             $scheme = new FeeBillScheme();
             $scheme->fill([
                 'name'        => trim((string) $data['name']),
-                'slab'        => trim((string) $data['slab']),
+                'slab'        => $slabCount,
                 'session_id'  => !empty($data['session_id']) ? (int) $data['session_id'] : null,
                 'firm_id'     => !empty($data['firm_id']) ? (int) $data['firm_id'] : null,
                 'description' => isset($data['description']) ? trim((string) $data['description']) : null,
@@ -130,9 +144,8 @@ class FeeBillSchemeController
 
             $schemeId = $scheme->id();
 
-            // Insert slab wise amounts if provided
-            $amounts = isset($data['amounts']) && is_array($data['amounts']) ? $data['amounts'] : [];
-            $this->saveAmounts($schemeId, $amounts);
+            // Save slabs and nested amounts
+            $this->saveSlabs($schemeId, $slabs, $slabCount);
 
             $pdo->commit();
 
@@ -156,7 +169,7 @@ class FeeBillSchemeController
 
         $validator = Validator::make($data, [
             'name'       => 'required|string|max:255',
-            'slab'       => 'required|string|max:100',
+            'slab'       => 'required|integer|min:1',
             'session_id' => 'nullable|integer|exists:academic_years,id',
             'firm_id'    => 'nullable|integer|exists:firms,id',
         ]);
@@ -169,9 +182,15 @@ class FeeBillSchemeController
         $pdo->beginTransaction();
 
         try {
+            $slabCount = (int) $data['slab'];
+            $slabs = $this->normalizeSlabsData($data);
+            if ($slabCount <= 0 && $slabs !== []) {
+                $slabCount = count($slabs);
+            }
+
             $scheme->fill([
                 'name'        => trim((string) $data['name']),
-                'slab'        => trim((string) $data['slab']),
+                'slab'        => $slabCount,
                 'session_id'  => !empty($data['session_id']) ? (int) $data['session_id'] : null,
                 'firm_id'     => !empty($data['firm_id']) ? (int) $data['firm_id'] : null,
                 'description' => isset($data['description']) ? trim((string) $data['description']) : null,
@@ -183,12 +202,13 @@ class FeeBillSchemeController
 
             $schemeId = $scheme->id();
 
-            // If amounts array is passed, replace old records with updated ones
-            if (isset($data['amounts']) && is_array($data['amounts'])) {
-                $delStmt = $pdo->prepare('DELETE FROM fee_bill_scheme_amounts WHERE fee_bill_scheme_id = :scheme_id');
+            // If slabs or amounts passed, update child slabs and amounts
+            if (isset($data['slabs']) || isset($data['amounts'])) {
+                // Deleting slabs will CASCADE delete amounts from fee_bill_scheme_amounts
+                $delStmt = $pdo->prepare('DELETE FROM fee_bill_scheme_slabs WHERE fee_bill_scheme_id = :scheme_id');
                 $delStmt->execute(['scheme_id' => $schemeId]);
 
-                $this->saveAmounts($schemeId, $data['amounts']);
+                $this->saveSlabs($schemeId, $slabs, $slabCount);
             }
 
             $pdo->commit();
@@ -218,37 +238,120 @@ class FeeBillSchemeController
     }
 
     /**
-     * Save child slab wise amounts.
+     * Normalize slabs data from either nested slabs structure or flat amounts array.
      */
-    private function saveAmounts(int $schemeId, array $amounts): void
+    private function normalizeSlabsData(array $data): array
     {
-        if ($amounts === []) {
-            return;
+        if (isset($data['slabs']) && is_array($data['slabs'])) {
+            $slabs = [];
+            foreach ($data['slabs'] as $idx => $s) {
+                $slabNo = !empty($s['slab_no']) ? (int) $s['slab_no'] : ($idx + 1);
+                $dueDate = !empty($s['due_date']) ? (string) $s['due_date'] : null;
+                $amounts = [];
+
+                if (isset($s['amounts']) && is_array($s['amounts'])) {
+                    foreach ($s['amounts'] as $a) {
+                        $amounts[] = [
+                            'fee_head_id' => !empty($a['fee_head_id']) ? (int) $a['fee_head_id'] : null,
+                            'amount'      => isset($a['amount']) ? (float) $a['amount'] : 0.00,
+                        ];
+                    }
+                }
+
+                $slabs[] = [
+                    'slab_no'  => $slabNo,
+                    'due_date' => $dueDate,
+                    'amounts'  => $amounts,
+                ];
+            }
+            return $slabs;
         }
 
-        $sql = 'INSERT INTO fee_bill_scheme_amounts 
-                (fee_bill_scheme_id, slab_no, slab_name, fee_head_id, amount, due_date, created_at, updated_at)
-                VALUES (:scheme_id, :slab_no, :slab_name, :fee_head_id, :amount, :due_date, NOW(), NOW())';
-        $stmt = Database::pdo()->prepare($sql);
+        // Fallback: Legacy flat amounts array grouped by slab_no
+        if (isset($data['amounts']) && is_array($data['amounts'])) {
+            $slabsMap = [];
+            foreach ($data['amounts'] as $idx => $amt) {
+                $sNo = !empty($amt['slab_no']) ? (int) $amt['slab_no'] : ($idx + 1);
+                if (!isset($slabsMap[$sNo])) {
+                    $slabsMap[$sNo] = [
+                        'slab_no'  => $sNo,
+                        'due_date' => !empty($amt['due_date']) ? (string) $amt['due_date'] : null,
+                        'amounts'  => [],
+                    ];
+                }
+                $slabsMap[$sNo]['amounts'][] = [
+                    'fee_head_id' => !empty($amt['fee_head_id']) ? (int) $amt['fee_head_id'] : null,
+                    'amount'      => isset($amt['amount']) ? (float) $amt['amount'] : 0.00,
+                ];
+            }
+            return array_values($slabsMap);
+        }
 
+        return [];
+    }
+
+    /**
+     * Save child slabs and their grandchild amounts.
+     */
+    private function saveSlabs(int $schemeId, array $slabs, int $expectedCount = 0): void
+    {
+        $pdo = Database::pdo();
+
+        $slabStmt = $pdo->prepare('
+            INSERT INTO fee_bill_scheme_slabs (fee_bill_scheme_id, slab_no, due_date, created_at, updated_at)
+            VALUES (:scheme_id, :slab_no, :due_date, NOW(), NOW())
+        ');
+
+        $amtStmt = $pdo->prepare('
+            INSERT INTO fee_bill_scheme_amounts (fee_bill_scheme_slab_id, fee_head_id, amount, created_at, updated_at)
+            VALUES (:slab_id, :fee_head_id, :amount, NOW(), NOW())
+        ');
+
+        $savedSlabNos = [];
         $seq = 1;
-        foreach ($amounts as $item) {
-            $slabNo = !empty($item['slab_no']) ? (int) $item['slab_no'] : $seq;
-            $slabName = !empty($item['slab_name']) ? trim((string) $item['slab_name']) : "Slab {$slabNo}";
-            $feeHeadId = !empty($item['fee_head_id']) ? (int) $item['fee_head_id'] : null;
-            $amount = isset($item['amount']) ? (float) $item['amount'] : 0.00;
-            $dueDate = !empty($item['due_date']) ? (string) $item['due_date'] : null;
 
-            $stmt->execute([
-                'scheme_id'   => $schemeId,
-                'slab_no'     => $slabNo,
-                'slab_name'   => $slabName,
-                'fee_head_id' => $feeHeadId,
-                'amount'      => $amount,
-                'due_date'    => $dueDate,
+        foreach ($slabs as $slab) {
+            $slabNo = !empty($slab['slab_no']) ? (int) $slab['slab_no'] : $seq;
+            $dueDate = !empty($slab['due_date']) ? (string) $slab['due_date'] : null;
+
+            $slabStmt->execute([
+                'scheme_id' => $schemeId,
+                'slab_no'   => $slabNo,
+                'due_date'  => $dueDate,
             ]);
 
+            $slabId = (int) $pdo->lastInsertId();
+            $savedSlabNos[] = $slabNo;
+
+            $amounts = isset($slab['amounts']) && is_array($slab['amounts']) ? $slab['amounts'] : [];
+            foreach ($amounts as $amt) {
+                $feeHeadId = !empty($amt['fee_head_id']) ? (int) $amt['fee_head_id'] : null;
+                $amountVal = isset($amt['amount']) ? (float) $amt['amount'] : 0.00;
+
+                // Save if head is selected or amount > 0
+                if ($feeHeadId !== null || $amountVal > 0) {
+                    $amtStmt->execute([
+                        'slab_id'     => $slabId,
+                        'fee_head_id' => $feeHeadId,
+                        'amount'      => $amountVal,
+                    ]);
+                }
+            }
+
             $seq++;
+        }
+
+        // If slab count requested is greater than provided slabs, fill remaining slabs
+        if ($expectedCount > count($savedSlabNos)) {
+            for ($i = count($savedSlabNos) + 1; $i <= $expectedCount; $i++) {
+                if (!in_array($i, $savedSlabNos, true)) {
+                    $slabStmt->execute([
+                        'scheme_id' => $schemeId,
+                        'slab_no'   => $i,
+                        'due_date'  => null,
+                    ]);
+                }
+            }
         }
     }
 }
