@@ -15,13 +15,18 @@ class Request
     private array $json;
     private array $server;
 
-    public function __construct()
-    {
-        $this->query  = $_GET;
-        $this->post   = $_POST;
-        $this->file   = $_FILES;
-        $this->server = $_SERVER;
-        $this->json   = $this->parseJsonBody();
+    public function __construct(
+        array $query = [],
+        array $post = [],
+        array $json = [],
+        array $server = [],
+        array $file = []
+    ) {
+        $this->query  = $query ?: $_GET;
+        $this->post   = $post ?: $_POST;
+        $this->file   = $file ?: $_FILES;
+        $this->server = $server ?: $_SERVER;
+        $this->json   = $json ?: ($post ? [] : $this->parseJsonBody());
     }
 
     private function parseJsonBody(): array

@@ -92,6 +92,11 @@ $resources = [
     // Admission
     'prospectus'             => 'ProspectusController',
     'registrations'          => 'RegistrationController',
+    // Fees
+    'fee-heads'              => 'FeeHeadController',
+    'fee-bill-schemes'       => 'FeeBillSchemeController',
+    'fee-concessions'        => 'FeeConcessionController',
+    'concessions'            => 'FeeConcessionController',
 ];
 
 // Admission custom routes (registered before resource loop to avoid {id} capturing)

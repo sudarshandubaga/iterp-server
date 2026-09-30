@@ -60,6 +60,16 @@ class Response
         return $this;
     }
 
+    public function getStatus(): int
+    {
+        return $this->status;
+    }
+
+    public function getBody(): mixed
+    {
+        return $this->body;
+    }
+
     public function send(): self
     {
         http_response_code($this->status);
