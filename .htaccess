@@ -65,13 +65,19 @@ DirectoryIndex index.php public/index.php
 </IfModule>
 
 # ------------------------------------------------------------------------------
-# 3. Security Headers
+# 3. Security Headers & CORS
 # ------------------------------------------------------------------------------
 <IfModule mod_headers.c>
     Header set X-Content-Type-Options "nosniff"
     Header set X-Frame-Options "SAMEORIGIN"
     Header set X-XSS-Protection "1; mode=block"
     Header set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Ensure CORS headers are always sent (even on errors, 4xx, 5xx)
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept"
+    Header always set Access-Control-Max-Age "86400"
 </IfModule>
 
 # ------------------------------------------------------------------------------
