@@ -325,11 +325,11 @@ class FeeCollectionController
                        LEFT JOIN academic_classes ac ON ac.id = sec.class_id
                        LEFT JOIN student_categories sc ON sc.id = s.student_category_id
                        LEFT JOIN registrations reg ON reg.student_id = s.id
-                       WHERE (s.id = :id OR s.user_id = :id) AND s.deleted_at IS NULL AND u.deleted_at IS NULL
+                       WHERE (s.id = :id1 OR s.user_id = :id2) AND s.deleted_at IS NULL AND u.deleted_at IS NULL
                        LIMIT 1";
 
         $studentStmt = $pdo->prepare($studentSql);
-        $studentStmt->execute(['id' => $studentId]);
+        $studentStmt->execute(['id1' => $studentId, 'id2' => $studentId]);
         $student = $studentStmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$student) {

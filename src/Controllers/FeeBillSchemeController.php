@@ -329,8 +329,8 @@ class FeeBillSchemeController
                           fbs.name AS student_scheme_name,
                           sec.fee_bill_scheme_id AS section_scheme_id,
                           sec_fbs.name AS section_scheme_name,
-                          CASE WHEN s.fee_bill_scheme_id = :scheme_id THEN 1 ELSE 0 END AS is_directly_assigned,
-                          CASE WHEN (s.fee_bill_scheme_id IS NULL OR s.fee_bill_scheme_id = 0) AND sec.fee_bill_scheme_id = :scheme_id THEN 1 ELSE 0 END AS is_inherited
+                          CASE WHEN s.fee_bill_scheme_id = :scheme_id_1 THEN 1 ELSE 0 END AS is_directly_assigned,
+                          CASE WHEN (s.fee_bill_scheme_id IS NULL OR s.fee_bill_scheme_id = 0) AND sec.fee_bill_scheme_id = :scheme_id_2 THEN 1 ELSE 0 END AS is_inherited
                    FROM students s
                    JOIN users u ON u.id = s.user_id AND u.deleted_at IS NULL
                    LEFT JOIN sections sec ON sec.id = s.section_id
@@ -338,11 +338,16 @@ class FeeBillSchemeController
                    LEFT JOIN fee_bill_schemes fbs ON fbs.id = s.fee_bill_scheme_id
                    LEFT JOIN fee_bill_schemes sec_fbs ON sec_fbs.id = sec.fee_bill_scheme_id
                    WHERE s.deleted_at IS NULL';
-        $stuParams = ['scheme_id' => $schemeId];
+        $stuParams = [
+            'scheme_id_1' => $schemeId,
+            'scheme_id_2' => $schemeId,
+        ];
 
         if (!empty($sessionId)) {
-            $stuSql .= ' AND (s.academic_year_id = :session_id OR u.academic_year_id = :session_id OR sec.academic_year_id = :session_id)';
-            $stuParams['session_id'] = $sessionId;
+            $stuSql .= ' AND (s.academic_year_id = :session_id_1 OR u.academic_year_id = :session_id_2 OR sec.academic_year_id = :session_id_3)';
+            $stuParams['session_id_1'] = $sessionId;
+            $stuParams['session_id_2'] = $sessionId;
+            $stuParams['session_id_3'] = $sessionId;
         }
         if (!empty($classId)) {
             $stuSql .= ' AND sec.class_id = :class_id';
