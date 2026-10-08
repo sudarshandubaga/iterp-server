@@ -84,7 +84,7 @@ class StudentController
                   INNER JOIN roles r ON r.id = u.role_id
                   WHERE r.name = :role AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)';
         if (isset($bindings['academic_year_id'])) {
-            $where .= ' AND (u.academic_year_id = :academic_year_id OR s.academic_year_id = :academic_year_id)';
+            $where .= ' AND COALESCE(s.academic_year_id, u.academic_year_id) = :academic_year_id';
         }
         if (isset($bindings['firm_id'])) {
             $where .= ' AND u.firm_id = :firm_id';
@@ -108,7 +108,7 @@ class StudentController
     {
         $sql = '';
         if (isset($bindings['academic_year_id'])) {
-            $sql .= ' AND (u.academic_year_id = :academic_year_id OR s.academic_year_id = :academic_year_id)';
+            $sql .= ' AND COALESCE(s.academic_year_id, u.academic_year_id) = :academic_year_id';
         }
         if (isset($bindings['firm_id'])) {
             $sql .= ' AND u.firm_id = :firm_id';
@@ -276,9 +276,9 @@ class StudentController
              LEFT JOIN sections sec ON sec.id = s.section_id
              LEFT JOIN academic_classes ac ON ac.id = sec.class_id
              LEFT JOIN registrations reg ON reg.student_id = s.id
-             WHERE (u.id = :id OR s.id = :id) AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
+             WHERE (u.id = :id_u OR s.id = :id_s) AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
         );
-        $stmt->execute(['id' => $id]);
+        $stmt->execute(['id_u' => $id, 'id_s' => $id]);
         $student = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         return $student
