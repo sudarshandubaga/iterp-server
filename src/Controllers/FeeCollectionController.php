@@ -277,9 +277,16 @@ class FeeCollectionController
                         }
                     }
 
+                    $targetSlabId = !empty($item['fee_bill_scheme_slab_id'])
+                        ? (int) $item['fee_bill_scheme_slab_id']
+                        : (!empty($item['slab_id']) ? (int) $item['slab_id'] : null);
+                    if ($targetSlabId === null && !empty($data['slab_ids']) && count($data['slab_ids']) === 1) {
+                        $targetSlabId = (int) $data['slab_ids'][0];
+                    }
+
                     $itemStmt->execute([
                         'fee_collection_id' => $collectionId,
-                        'slab_id'           => !empty($item['fee_bill_scheme_slab_id']) ? (int) $item['fee_bill_scheme_slab_id'] : null,
+                        'slab_id'           => $targetSlabId,
                         'fee_head_id'       => (int) $item['fee_head_id'],
                         'amount'            => $headAmount,
                         'concession'        => $headConcession,
@@ -479,12 +486,26 @@ class FeeCollectionController
             $slabStmt->execute(['scheme_id' => $selectedSchemeId]);
             $rawSlabs = $slabStmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Fetch all past collections for this student
+            // Auto-ensure discount_amount exists on fee_collection_items table
+            try {
+                $hasDiscCol = (bool) $pdo->query("SHOW COLUMNS FROM fee_collection_items LIKE 'discount_amount'")->fetch();
+                if (!$hasDiscCol) {
+                    $pdo->exec("ALTER TABLE fee_collection_items ADD COLUMN discount_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER concession");
+                }
+            } catch (\Throwable $e) {
+                // ignore
+            }
+
+            $studentDbId = (int) ($student['student_id'] ?? $student['id'] ?? $studentId);
+            $userDbId = (int) ($student['user_id'] ?? 0);
+
+            // Fetch all past collections for this student (dual ID matching)
             $pastColSql = 'SELECT fc.id, fc.discount_amount, fc.subtotal_amount, fc.total_amount, fc.paid_amount, fc.balance_amount
                            FROM fee_collections fc
-                           WHERE fc.student_id = :student_id AND fc.deleted_at IS NULL';
+                           WHERE (fc.student_id = :sid1 OR fc.student_id = :sid2) AND fc.deleted_at IS NULL
+                           ORDER BY fc.payment_date ASC, fc.id ASC';
             $pastColStmt = $pdo->prepare($pastColSql);
-            $pastColStmt->execute(['student_id' => $studentId]);
+            $pastColStmt->execute(['sid1' => $studentDbId, 'sid2' => $userDbId]);
             $pastCollections = $pastColStmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Fetch slab associations for past collections
@@ -492,9 +513,9 @@ class FeeCollectionController
                 'SELECT fcs.fee_collection_id, fcs.fee_bill_scheme_slab_id
                  FROM fee_collection_slabs fcs
                  JOIN fee_collections fc ON fc.id = fcs.fee_collection_id
-                 WHERE fc.student_id = :student_id AND fc.deleted_at IS NULL'
+                 WHERE (fc.student_id = :sid1 OR fc.student_id = :sid2) AND fc.deleted_at IS NULL'
             );
-            $pastSlabLinksStmt->execute(['student_id' => $studentId]);
+            $pastSlabLinksStmt->execute(['sid1' => $studentDbId, 'sid2' => $userDbId]);
             $pastSlabLinks = $pastSlabLinksStmt->fetchAll(PDO::FETCH_ASSOC);
 
             $colToSlabs = [];
@@ -514,9 +535,9 @@ class FeeCollectionController
                         fci.total, fci.paid_amount
                  FROM fee_collection_items fci
                  JOIN fee_collections fc ON fc.id = fci.fee_collection_id
-                 WHERE fc.student_id = :student_id AND fc.deleted_at IS NULL'
+                 WHERE (fc.student_id = :sid1 OR fc.student_id = :sid2) AND fc.deleted_at IS NULL'
             );
-            $pastItemsStmt->execute(['student_id' => $studentId]);
+            $pastItemsStmt->execute(['sid1' => $studentDbId, 'sid2' => $userDbId]);
             $pastItems = $pastItemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
             $itemsByCol = [];
@@ -530,14 +551,22 @@ class FeeCollectionController
             $discountBySlabHead = [];
             $paidBySlab = [];
             $discountBySlab = [];
+            $unassignedPaid = 0.0;
+            $unassignedDiscount = 0.0;
 
             foreach ($pastCollections as $pc) {
                 $cId = (int) $pc['id'];
+                $cPaid = (float) ($pc['paid_amount'] ?? 0);
                 $cDiscount = (float) ($pc['discount_amount'] ?? 0);
                 $slabsForCol = $colToSlabs[$cId] ?? [];
                 $itemsForCol = $itemsByCol[$cId] ?? [];
 
-                // Check if items have discount_amount populated
+                if (empty($slabsForCol) && empty($itemsForCol)) {
+                    $unassignedPaid += $cPaid;
+                    $unassignedDiscount += $cDiscount;
+                    continue;
+                }
+
                 $itemDiscountSum = 0.0;
                 $itemNetSum = 0.0;
                 foreach ($itemsForCol as $it) {
@@ -548,6 +577,8 @@ class FeeCollectionController
                 $needDistributeDiscount = ($cDiscount > 0.001 && $itemDiscountSum <= 0.001);
                 $remDiscountToDistribute = $cDiscount;
                 $itCount = count($itemsForCol);
+                $colAllocatedPaidToSlabs = 0.0;
+                $colAllocatedDiscToSlabs = 0.0;
 
                 foreach ($itemsForCol as $idx => $it) {
                     $slabId = !empty($it['fee_bill_scheme_slab_id']) ? (int) $it['fee_bill_scheme_slab_id'] : 0;
@@ -576,18 +607,27 @@ class FeeCollectionController
 
                         $paidBySlab[$slabId] = ($paidBySlab[$slabId] ?? 0.0) + $paid;
                         $discountBySlab[$slabId] = ($discountBySlab[$slabId] ?? 0.0) + $disc;
+
+                        $colAllocatedPaidToSlabs += $paid;
+                        $colAllocatedDiscToSlabs += $disc;
                     }
                 }
 
                 // If collection had slabs linked but no items, attribute evenly to slabs
-                if (empty($itemsForCol) && !empty($slabsForCol)) {
-                    $cPaid = (float) ($pc['paid_amount'] ?? 0);
-                    $eachPaid = round($cPaid / count($slabsForCol), 2);
-                    $eachDisc = round($cDiscount / count($slabsForCol), 2);
+                $remColPaid = max(0.0, round($cPaid - $colAllocatedPaidToSlabs, 2));
+                $remColDisc = max(0.0, round($cDiscount - $colAllocatedDiscToSlabs, 2));
+
+                if (!empty($slabsForCol) && ($remColPaid > 0.001 || $remColDisc > 0.001)) {
+                    $numSlabs = count($slabsForCol);
+                    $eachPaid = round($remColPaid / $numSlabs, 2);
+                    $eachDisc = round($remColDisc / $numSlabs, 2);
                     foreach ($slabsForCol as $sId) {
                         $paidBySlab[$sId] = ($paidBySlab[$sId] ?? 0.0) + $eachPaid;
                         $discountBySlab[$sId] = ($discountBySlab[$sId] ?? 0.0) + $eachDisc;
                     }
+                } elseif (empty($slabsForCol) && ($remColPaid > 0.001 || $remColDisc > 0.001)) {
+                    $unassignedPaid += $remColPaid;
+                    $unassignedDiscount += $remColDisc;
                 }
             }
 
@@ -607,7 +647,7 @@ class FeeCollectionController
 
                 $slabSubtotal = 0.0;
                 $slabConcession = 0.0;
-                $slabProcessedAmounts = [];
+                $slabHeadConfigs = [];
 
                 foreach ($amounts as $amt) {
                     $headId = (int) $amt['fee_head_id'];
@@ -627,16 +667,94 @@ class FeeCollectionController
                     $slabSubtotal += $baseAmt;
                     $slabConcession += $concessionAmt;
 
-                    $headPaid = round($paidBySlabHead[$sId][$headId] ?? 0.0, 2);
-                    $headDiscount = round($discountBySlabHead[$sId][$headId] ?? 0.0, 2);
-                    $headSettled = round($headPaid + $headDiscount, 2);
-                    $headBalance = max(0.0, round($netHeadAmt - $headSettled, 2));
+                    $slabHeadConfigs[] = [
+                        'fee_head_id'   => $headId,
+                        'fee_head_name' => $amt['fee_head_name'] ?: "Head #{$headId}",
+                        'amount'        => $baseAmt,
+                        'concession'    => $concessionAmt,
+                        'total'         => $netHeadAmt,
+                    ];
+                }
+
+                $slabNet = max(0.0, round($slabSubtotal - $slabConcession, 2));
+                $slabPaidSoFar = round($paidBySlab[$sId] ?? 0.0, 2);
+                $slabDiscountSoFar = round($discountBySlab[$sId] ?? 0.0, 2);
+
+                // FIFO absorption of unassigned past collections if any
+                $currentSlabSettled = round($slabPaidSoFar + $slabDiscountSoFar, 2);
+                $remCapacity = max(0.0, round($slabNet - $currentSlabSettled, 2));
+
+                if ($remCapacity > 0.001 && ($unassignedDiscount > 0.001 || $unassignedPaid > 0.001)) {
+                    if ($unassignedDiscount > 0.001) {
+                        $takeDisc = min($remCapacity, $unassignedDiscount);
+                        $slabDiscountSoFar += $takeDisc;
+                        $unassignedDiscount = max(0.0, round($unassignedDiscount - $takeDisc, 2));
+                        $remCapacity = max(0.0, round($remCapacity - $takeDisc, 2));
+                    }
+                    if ($remCapacity > 0.001 && $unassignedPaid > 0.001) {
+                        $takePaid = min($remCapacity, $unassignedPaid);
+                        $slabPaidSoFar += $takePaid;
+                        $unassignedPaid = max(0.0, round($unassignedPaid - $takePaid, 2));
+                        $remCapacity = max(0.0, round($remCapacity - $takePaid, 2));
+                    }
+                }
+
+                // Bound slab settled and balance
+                $slabSettled = min($slabNet, round($slabPaidSoFar + $slabDiscountSoFar, 2));
+                $slabBalance = max(0.0, round($slabNet - $slabSettled, 2));
+
+                // Process fee heads for this slab
+                $sumExplicitHeadSettled = 0.0;
+                foreach ($slabHeadConfigs as $cfg) {
+                    $hId = $cfg['fee_head_id'];
+                    $hP = (float) ($paidBySlabHead[$sId][$hId] ?? 0.0);
+                    $hD = (float) ($discountBySlabHead[$sId][$hId] ?? 0.0);
+                    $sumExplicitHeadSettled += ($hP + $hD);
+                }
+
+                $useExplicit = ($sumExplicitHeadSettled > 0.001 && abs($sumExplicitHeadSettled - $slabSettled) < 0.05);
+
+                $slabProcessedAmounts = [];
+                $headCount = count($slabHeadConfigs);
+                $allocatedHeadPaid = 0.0;
+                $allocatedHeadDisc = 0.0;
+                $allocatedHeadSettled = 0.0;
+                $allocatedHeadBalance = 0.0;
+
+                foreach ($slabHeadConfigs as $idx => $cfg) {
+                    $hId = $cfg['fee_head_id'];
+                    $netHeadAmt = $cfg['total'];
+
+                    if ($useExplicit) {
+                        $headPaid = round($paidBySlabHead[$sId][$hId] ?? 0.0, 2);
+                        $headDiscount = round($discountBySlabHead[$sId][$hId] ?? 0.0, 2);
+                        $headSettled = round($headPaid + $headDiscount, 2);
+                        $headBalance = max(0.0, round($netHeadAmt - $headSettled, 2));
+                    } else {
+                        if ($idx === $headCount - 1) {
+                            $headPaid = max(0.0, round($slabPaidSoFar - $allocatedHeadPaid, 2));
+                            $headDiscount = max(0.0, round($slabDiscountSoFar - $allocatedHeadDisc, 2));
+                            $headSettled = max(0.0, round($slabSettled - $allocatedHeadSettled, 2));
+                            $headBalance = max(0.0, round($slabBalance - $allocatedHeadBalance, 2));
+                        } else {
+                            $share = $slabNet > 0.001 ? ($netHeadAmt / $slabNet) : (1.0 / max(1, $headCount));
+                            $headPaid = min($netHeadAmt, round($slabPaidSoFar * $share, 2));
+                            $headDiscount = min(max(0.0, $netHeadAmt - $headPaid), round($slabDiscountSoFar * $share, 2));
+                            $headSettled = round($headPaid + $headDiscount, 2);
+                            $headBalance = max(0.0, round($netHeadAmt - $headSettled, 2));
+
+                            $allocatedHeadPaid += $headPaid;
+                            $allocatedHeadDisc += $headDiscount;
+                            $allocatedHeadSettled += $headSettled;
+                            $allocatedHeadBalance += $headBalance;
+                        }
+                    }
 
                     $slabProcessedAmounts[] = [
-                        'fee_head_id'     => $headId,
-                        'fee_head_name'   => $amt['fee_head_name'] ?: "Head #{$headId}",
-                        'amount'          => $baseAmt,
-                        'concession'      => $concessionAmt,
+                        'fee_head_id'     => $hId,
+                        'fee_head_name'   => $cfg['fee_head_name'],
+                        'amount'          => $cfg['amount'],
+                        'concession'      => $cfg['concession'],
                         'total'           => $netHeadAmt,
                         'paid_amount'     => $headPaid,
                         'discount_amount' => $headDiscount,
@@ -644,12 +762,6 @@ class FeeCollectionController
                         'balance'         => $headBalance,
                     ];
                 }
-
-                $slabNet = max(0.0, round($slabSubtotal - $slabConcession, 2));
-                $slabPaidSoFar = round($paidBySlab[$sId] ?? 0.0, 2);
-                $slabDiscountSoFar = round($discountBySlab[$sId] ?? 0.0, 2);
-                $slabSettled = round($slabPaidSoFar + $slabDiscountSoFar, 2);
-                $slabBalance = max(0.0, round($slabNet - $slabSettled, 2));
 
                 $isPaid = ($slabBalance <= 0.001 && $slabNet > 0);
                 $isPartial = ($slabSettled > 0.001 && $slabBalance > 0.001);
@@ -684,10 +796,10 @@ class FeeCollectionController
                     subtotal_amount, concession_amount, discount_amount,
                     total_amount, paid_amount, balance_amount, created_at
              FROM fee_collections
-             WHERE student_id = :student_id AND deleted_at IS NULL
+             WHERE (student_id = :sid1 OR student_id = :sid2) AND deleted_at IS NULL
              ORDER BY id DESC LIMIT 10'
         );
-        $historyStmt->execute(['student_id' => $studentId]);
+        $historyStmt->execute(['sid1' => $studentDbId, 'sid2' => $userDbId]);
         $history = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 
         return Response::success([
