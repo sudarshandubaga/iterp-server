@@ -81,14 +81,17 @@ class FeeCollectionController
 
         $sql = "SELECT fc.*,
                        CONCAT(u.first_name, IF(u.last_name IS NOT NULL AND u.last_name != '', CONCAT(' ', u.last_name), '')) AS student_name,
-                       s.enrollment_number, s.roll_number,
+                       s.enrollment_number, s.scholar_number, s.roll_number,
+                       reg.father_name, reg.mother_name,
                        sec.name AS section_name, ac.name AS class_name,
-                       ay.name AS session_name, f.name AS firm_name,
+                       ay.name AS session_name,
+                       f.name AS firm_name, f.address AS firm_address, f.phone_no AS firm_phone, f.email AS firm_email, f.logo AS firm_logo,
                        fbs.name AS scheme_name,
                        fcon.name AS concession_name
                 FROM fee_collections fc
                 JOIN students s ON s.id = fc.student_id
                 JOIN users u ON u.id = s.user_id
+                LEFT JOIN registrations reg ON reg.student_id = s.id
                 LEFT JOIN sections sec ON sec.id = s.section_id
                 LEFT JOIN academic_classes ac ON ac.id = sec.class_id
                 LEFT JOIN academic_years ay ON ay.id = fc.session_id
@@ -115,9 +118,10 @@ class FeeCollectionController
                        u.email AS student_email, u.mobile_no AS student_mobile,
                        s.enrollment_number, s.scholar_number, s.roll_number,
                        s.father_mobile_no, s.father_email,
-                       reg.father_name,
+                       reg.father_name, reg.mother_name,
                        sec.name AS section_name, ac.name AS class_name,
-                       ay.name AS session_name, f.name AS firm_name,
+                       ay.name AS session_name,
+                       f.name AS firm_name, f.address AS firm_address, f.phone_no AS firm_phone, f.email AS firm_email, f.logo AS firm_logo,
                        fbs.name AS scheme_name,
                        fcon.name AS concession_name
                 FROM fee_collections fc
