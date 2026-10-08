@@ -129,6 +129,49 @@ class FeeBillScheme extends Model
             $data['firm_name'] = null;
         }
 
+        $id = $this->id();
+        if ($id > 0) {
+            $pdo = Database::pdo();
+            try {
+                $secStmt = $pdo->prepare('SELECT COUNT(*) FROM sections WHERE fee_bill_scheme_id = :id AND deleted_at IS NULL');
+                $secStmt->execute(['id' => $id]);
+                $data['assigned_sections_count'] = (int) $secStmt->fetchColumn();
+
+                $stuStmt = $pdo->prepare('SELECT COUNT(*) FROM students WHERE fee_bill_scheme_id = :id AND deleted_at IS NULL');
+                $stuStmt->execute(['id' => $id]);
+                $data['assigned_students_count'] = (int) $stuStmt->fetchColumn();
+
+                $inhStmt = $pdo->prepare('SELECT COUNT(*) FROM students st 
+                                          JOIN sections sec ON sec.id = st.section_id 
+                                          WHERE sec.fee_bill_scheme_id = :id 
+                                            AND st.fee_bill_scheme_id IS NULL 
+                                            AND st.deleted_at IS NULL 
+                                            AND sec.deleted_at IS NULL');
+                $inhStmt->execute(['id' => $id]);
+                $data['inherited_students_count'] = (int) $inhStmt->fetchColumn();
+                $data['total_covered_students'] = $data['assigned_students_count'] + $data['inherited_students_count'];
+
+                $namesStmt = $pdo->prepare('SELECT sec.id, sec.name, sec.class_id, ac.name AS class_name FROM sections sec 
+                                            LEFT JOIN academic_classes ac ON ac.id = sec.class_id 
+                                            WHERE sec.fee_bill_scheme_id = :id AND sec.deleted_at IS NULL
+                                            ORDER BY ac.sort_order ASC, ac.name ASC, sec.name ASC');
+                $namesStmt->execute(['id' => $id]);
+                $data['assigned_sections'] = $namesStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            } catch (\Throwable $e) {
+                $data['assigned_sections_count'] = 0;
+                $data['assigned_students_count'] = 0;
+                $data['inherited_students_count'] = 0;
+                $data['total_covered_students'] = 0;
+                $data['assigned_sections'] = [];
+            }
+        } else {
+            $data['assigned_sections_count'] = 0;
+            $data['assigned_students_count'] = 0;
+            $data['inherited_students_count'] = 0;
+            $data['total_covered_students'] = 0;
+            $data['assigned_sections'] = [];
+        }
+
         return $data;
     }
 }

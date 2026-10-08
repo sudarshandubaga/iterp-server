@@ -66,30 +66,40 @@ class StudentController
             'roll_number'       => 'nullable|string|max:50',
             'photo'             => 'nullable|string',
             'student_category_id' => 'nullable|integer|exists:student_categories,id',
+            'fee_bill_scheme_id'  => 'nullable|integer|exists:fee_bill_schemes,id',
+            'fee_concession_id'   => 'nullable|integer|exists:fee_concessions,id',
             'custom_field_category_id' => 'nullable|integer|exists:custom_field_categories,id',
             'document_id'      => 'nullable|integer|exists:documents,id',
         ];
     }
 
     /** Columns searched by `?search=` in the student list. */
-    protected array $searchable = ['first_name', 'middle_name', 'last_name', 'username', 'email', 'mobile_no'];
+    protected array $searchable = ['first_name', 'middle_name', 'last_name', 'username', 'email', 'mobile_no', 'enrollment_number', 'scholar_number', 'roll_number'];
 
     protected function studentCountQuery(array $bindings): string
     {
         $where = 'SELECT COUNT(*) FROM users u
                   LEFT JOIN students s ON s.user_id = u.id
+                  LEFT JOIN sections sec ON sec.id = s.section_id
                   INNER JOIN roles r ON r.id = u.role_id
                   WHERE r.name = :role AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)';
         if (isset($bindings['academic_year_id'])) {
-            $where .= ' AND u.academic_year_id = :academic_year_id';
+            $where .= ' AND (u.academic_year_id = :academic_year_id OR s.academic_year_id = :academic_year_id)';
         }
         if (isset($bindings['firm_id'])) {
             $where .= ' AND u.firm_id = :firm_id';
         }
+        if (isset($bindings['section_id'])) {
+            $where .= ' AND s.section_id = :section_id';
+        }
+        if (isset($bindings['class_id'])) {
+            $where .= ' AND sec.class_id = :class_id';
+        }
         if (isset($bindings['s1'])) {
             $where .= ' AND (u.first_name LIKE :s1 OR u.middle_name LIKE :s2
                        OR u.last_name LIKE :s3 OR u.username LIKE :s4
-                       OR u.email LIKE :s5 OR u.mobile_no LIKE :s6)';
+                       OR u.email LIKE :s5 OR u.mobile_no LIKE :s6
+                       OR s.enrollment_number LIKE :s7 OR s.scholar_number LIKE :s8 OR s.roll_number LIKE :s9)';
         }
         return $where;
     }
@@ -98,15 +108,22 @@ class StudentController
     {
         $sql = '';
         if (isset($bindings['academic_year_id'])) {
-            $sql .= ' AND u.academic_year_id = :academic_year_id';
+            $sql .= ' AND (u.academic_year_id = :academic_year_id OR s.academic_year_id = :academic_year_id)';
         }
         if (isset($bindings['firm_id'])) {
             $sql .= ' AND u.firm_id = :firm_id';
         }
+        if (isset($bindings['section_id'])) {
+            $sql .= ' AND s.section_id = :section_id';
+        }
+        if (isset($bindings['class_id'])) {
+            $sql .= ' AND sec.class_id = :class_id';
+        }
         if (isset($bindings['s1'])) {
             $sql .= ' AND (u.first_name LIKE :s1 OR u.middle_name LIKE :s2
                        OR u.last_name LIKE :s3 OR u.username LIKE :s4
-                       OR u.email LIKE :s5 OR u.mobile_no LIKE :s6)';
+                       OR u.email LIKE :s5 OR u.mobile_no LIKE :s6
+                       OR s.enrollment_number LIKE :s7 OR s.scholar_number LIKE :s8 OR s.roll_number LIKE :s9)';
         }
         return $sql;
     }
@@ -124,8 +141,16 @@ class StudentController
         if ($firmId !== null && $firmId !== '') {
             $bindings['firm_id'] = (int) $firmId;
         }
+        $sectionId = $request->query('section_id');
+        if ($sectionId !== null && $sectionId !== '') {
+            $bindings['section_id'] = (int) $sectionId;
+        }
+        $classId = $request->query('class_id');
+        if ($classId !== null && $classId !== '') {
+            $bindings['class_id'] = (int) $classId;
+        }
 
-        // Case-insensitive LIKE search across the student name/contact fields.
+        // Case-insensitive LIKE search across name, contact, enrollment, roll fields.
         $search = $request->query('search');
         if ($search !== null && trim((string) $search) !== '') {
             $term = '%' . trim((string) $search) . '%';
@@ -135,6 +160,9 @@ class StudentController
             $bindings['s4'] = $term;
             $bindings['s5'] = $term;
             $bindings['s6'] = $term;
+            $bindings['s7'] = $term;
+            $bindings['s8'] = $term;
+            $bindings['s9'] = $term;
         }
 
         $paginate = $request->query('page') !== null || $request->query('per_page') !== null;
@@ -157,15 +185,23 @@ class StudentController
                         u.title_id, u.gender, u.dob, u.doj, u.email, u.mobile_no,
                         u.city_id, u.academic_year_id, u.firm_id, u.custom_field_category_id,
                         u.document_id, u.is_active,
-                        s.enrollment_number, s.scholar_number, s.roll_number,
+                        s.id AS student_id, s.enrollment_number, s.scholar_number, s.roll_number,
                         s.father_email, s.father_mobile_no, s.photo, s.section_id,
+                        s.fee_bill_scheme_id, s.fee_concession_id,
+                        fbs.name AS fee_bill_scheme_name,
+                        sec.fee_bill_scheme_id AS section_fee_bill_scheme_id,
+                        sec_fbs.name AS section_fee_bill_scheme_name,
                         s.student_category_id, sc.name AS student_category_name,
-                        sec.name AS section_name, sec.class_id, ac.name AS class_name
+                        sec.name AS section_name, sec.class_id, ac.name AS class_name,
+                        reg.father_name
                  FROM users u
                  LEFT JOIN students s ON s.user_id = u.id
                  LEFT JOIN student_categories sc ON sc.id = s.student_category_id
                  LEFT JOIN sections sec ON sec.id = s.section_id
                  LEFT JOIN academic_classes ac ON ac.id = sec.class_id
+                 LEFT JOIN fee_bill_schemes fbs ON fbs.id = s.fee_bill_scheme_id
+                 LEFT JOIN fee_bill_schemes sec_fbs ON sec_fbs.id = sec.fee_bill_scheme_id
+                 LEFT JOIN registrations reg ON reg.student_id = s.id
                  INNER JOIN roles r ON r.id = u.role_id
                  WHERE r.name = :role AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
                     . $this->buildStudentFilters(array_diff_key($bindings, ['role']))
@@ -193,15 +229,23 @@ class StudentController
                     u.title_id, u.gender, u.dob, u.doj, u.email, u.mobile_no,
                     u.city_id, u.academic_year_id, u.firm_id, u.custom_field_category_id,
                     u.document_id, u.is_active,
-                    s.enrollment_number, s.scholar_number, s.roll_number,
+                    s.id AS student_id, s.enrollment_number, s.scholar_number, s.roll_number,
                     s.father_email, s.father_mobile_no, s.photo, s.section_id,
+                    s.fee_bill_scheme_id, s.fee_concession_id,
+                    fbs.name AS fee_bill_scheme_name,
+                    sec.fee_bill_scheme_id AS section_fee_bill_scheme_id,
+                    sec_fbs.name AS section_fee_bill_scheme_name,
                     s.student_category_id, sc.name AS student_category_name,
-                    sec.name AS section_name, sec.class_id, ac.name AS class_name
+                    sec.name AS section_name, sec.class_id, ac.name AS class_name,
+                    reg.father_name
              FROM users u
              LEFT JOIN students s ON s.user_id = u.id
              LEFT JOIN student_categories sc ON sc.id = s.student_category_id
              LEFT JOIN sections sec ON sec.id = s.section_id
              LEFT JOIN academic_classes ac ON ac.id = sec.class_id
+             LEFT JOIN fee_bill_schemes fbs ON fbs.id = s.fee_bill_scheme_id
+             LEFT JOIN fee_bill_schemes sec_fbs ON sec_fbs.id = sec.fee_bill_scheme_id
+             LEFT JOIN registrations reg ON reg.student_id = s.id
              INNER JOIN roles r ON r.id = u.role_id
              WHERE r.name = :role AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
                 . $this->buildStudentFilters(array_diff_key($bindings, ['role']))
@@ -220,16 +264,19 @@ class StudentController
                     u.title_id, u.gender, u.dob, u.doj, u.email, u.mobile_no,
                     u.city_id, u.academic_year_id, u.firm_id, u.custom_field_category_id,
                     u.document_id, u.is_active,
-                    s.enrollment_number, s.scholar_number, s.roll_number,
+                    s.id AS student_id, s.enrollment_number, s.scholar_number, s.roll_number,
                     s.father_email, s.father_mobile_no, s.photo, s.section_id,
+                    s.fee_bill_scheme_id, s.fee_concession_id,
                     s.student_category_id, sc.name AS student_category_name,
-                    sec.name AS section_name, sec.class_id, ac.name AS class_name
+                    sec.name AS section_name, sec.class_id, ac.name AS class_name,
+                    reg.father_name
              FROM users u
              LEFT JOIN students s ON s.user_id = u.id
              LEFT JOIN student_categories sc ON sc.id = s.student_category_id
              LEFT JOIN sections sec ON sec.id = s.section_id
              LEFT JOIN academic_classes ac ON ac.id = sec.class_id
-             WHERE u.id = :id AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
+             LEFT JOIN registrations reg ON reg.student_id = s.id
+             WHERE (u.id = :id OR s.id = :id) AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
         );
         $stmt->execute(['id' => $id]);
         $student = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -364,6 +411,11 @@ class StudentController
                     u.firm_id, u.is_active,
                     s.enrollment_number, s.scholar_number, s.roll_number,
                     s.father_email, s.father_mobile_no, s.photo, s.section_id,
+                    s.fee_bill_scheme_id, s.fee_concession_id,
+                    fbs.name AS fee_bill_scheme_name,
+                    fc.name AS fee_concession_name,
+                    sec.fee_bill_scheme_id AS section_fee_bill_scheme_id,
+                    sec_fbs.name AS section_fee_bill_scheme_name,
                     s.student_category_id, sc.name AS student_category_name,
                     sec.name AS section_name, sec.class_id, ac.name AS class_name
              FROM users u
@@ -371,6 +423,9 @@ class StudentController
              LEFT JOIN student_categories sc ON sc.id = s.student_category_id
              LEFT JOIN sections sec ON sec.id = s.section_id
              LEFT JOIN academic_classes ac ON ac.id = sec.class_id
+             LEFT JOIN fee_bill_schemes fbs ON fbs.id = s.fee_bill_scheme_id
+             LEFT JOIN fee_concessions fc ON fc.id = s.fee_concession_id
+             LEFT JOIN fee_bill_schemes sec_fbs ON sec_fbs.id = sec.fee_bill_scheme_id
              WHERE u.id = :id'
         );
         $stmt->execute(['id' => $id]);
@@ -408,9 +463,11 @@ class StudentController
         $stmt = Database::pdo()->prepare(
             "INSERT INTO students
                 (user_id, enrollment_number, scholar_number, roll_number,
-                 father_email, father_mobile_no, photo, section_id, student_category_id, created_at, updated_at)
+                 father_email, father_mobile_no, photo, section_id, student_category_id,
+                 fee_bill_scheme_id, fee_concession_id, created_at, updated_at)
              VALUES
-                (:user_id, :enr, :sch, :roll, :femail, :fmobile, :photo, :section, :category, NOW(), NOW())
+                (:user_id, :enr, :sch, :roll, :femail, :fmobile, :photo, :section, :category,
+                 :scheme, :concession, NOW(), NOW())
              ON DUPLICATE KEY UPDATE
                 roll_number         = VALUES(roll_number),
                 father_email        = VALUES(father_email),
@@ -418,18 +475,22 @@ class StudentController
                 {$photoUpdateClause},
                 section_id          = VALUES(section_id),
                 student_category_id = VALUES(student_category_id),
+                fee_bill_scheme_id  = VALUES(fee_bill_scheme_id),
+                fee_concession_id   = VALUES(fee_concession_id),
                 updated_at          = NOW()"
         );
         $stmt->execute([
-            'user_id'  => $userId,
-            'enr'      => $enr,
-            'sch'      => $sch,
-            'roll'     => $data['roll_number'] ?? null,
-            'femail'   => $data['father_email'] ?? null,
-            'fmobile'  => $data['father_mobile_no'] ?? null,
-            'photo'    => $photoPath,
-            'section'  => !empty($data['section_id']) ? (int) $data['section_id'] : null,
-            'category' => !empty($data['student_category_id']) ? (int) $data['student_category_id'] : null,
+            'user_id'    => $userId,
+            'enr'        => $enr,
+            'sch'        => $sch,
+            'roll'       => $data['roll_number'] ?? null,
+            'femail'     => $data['father_email'] ?? null,
+            'fmobile'    => $data['father_mobile_no'] ?? null,
+            'photo'      => $photoPath,
+            'section'    => !empty($data['section_id']) ? (int) $data['section_id'] : null,
+            'category'   => !empty($data['student_category_id']) ? (int) $data['student_category_id'] : null,
+            'scheme'     => !empty($data['fee_bill_scheme_id']) ? (int) $data['fee_bill_scheme_id'] : null,
+            'concession' => !empty($data['fee_concession_id']) ? (int) $data['fee_concession_id'] : null,
         ]);
     }
 

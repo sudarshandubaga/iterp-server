@@ -99,7 +99,17 @@ $resources = [
     'fee-bill-scheme-amounts'=> 'FeeBillSchemeAmountController',
     'fee-concessions'        => 'FeeConcessionController',
     'concessions'            => 'FeeConcessionController',
+    'fee-collections'        => 'FeeCollectionController',
 ];
+
+// Fee collection custom routes (registered before resource loop to avoid {id} capturing)
+$router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
+$router->get('/api/fee-collections/student-dues',         [$locale . 'FeeCollectionController', 'studentDues'], $authOnly);
+
+// Fee bill scheme assignments custom routes
+$router->get('/api/fee-bill-schemes/{id}/assignments',     [$locale . 'FeeBillSchemeController', 'getAssignments'], $authOnly);
+$router->post('/api/fee-bill-schemes/{id}/assign-sections', [$locale . 'FeeBillSchemeController', 'assignSections'], $authOnly);
+$router->post('/api/fee-bill-schemes/{id}/assign-students', [$locale . 'FeeBillSchemeController', 'assignStudents'], $authOnly);
 
 // Admission custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/prospectus/next-number',               [$locale . 'ProspectusController', 'nextNumber'], $authOnly);

@@ -18,5 +18,6 @@ class Section extends Model
         'name',
         'class_id',
         'academic_year_id',
+        'fee_bill_scheme_id',
     ];
 }

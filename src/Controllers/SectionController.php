@@ -16,9 +16,10 @@ class SectionController extends CrudController
     protected string $model = Section::class;
 
     protected array $rules = [
-        'name'             => 'required|string|max:255',
-        'class_id'         => 'required|integer|exists:academic_classes,id',
-        'academic_year_id' => 'required|integer|exists:academic_years,id',
+        'name'               => 'required|string|max:255',
+        'class_id'           => 'required|integer|exists:academic_classes,id',
+        'academic_year_id'   => 'required|integer|exists:academic_years,id',
+        'fee_bill_scheme_id' => 'nullable|integer|exists:fee_bill_schemes,id',
     ];
 
     protected string $orderBy = 'name';
@@ -32,6 +33,9 @@ class SectionController extends CrudController
         }
         if ($request->query('academic_year_id') !== null) {
             $query->where('academic_year_id', (int) $request->query('academic_year_id'));
+        }
+        if ($request->query('fee_bill_scheme_id') !== null) {
+            $query->where('fee_bill_scheme_id', (int) $request->query('fee_bill_scheme_id'));
         }
     }
 }
