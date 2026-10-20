@@ -9,6 +9,7 @@ use Iterp\Core\Request;
 use Iterp\Core\Response;
 use Iterp\Core\Validator;
 use Iterp\Models\Student;
+use Iterp\Models\CustomFieldValue;
 
 /**
  * CRUD API for students (SIS > Add Students).
@@ -280,6 +281,13 @@ class StudentController
         );
         $stmt->execute(['id_u' => $id, 'id_s' => $id]);
         $student = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($student) {
+            $cf = CustomFieldValue::getForUser((int) $student['id']);
+            foreach ($cf['answers'] as $k => $v) {
+                $student[$k] = $v;
+            }
+            $student['custom_field_values'] = $cf['by_name'];
+        }
 
         return $student
             ? Response::success($student)
@@ -331,6 +339,7 @@ class StudentController
         // Record the student-specific profile in the `students` table. Its
         // NOT NULL columns get a generated value when the form left them blank.
         $this->upsertStudentProfile($studentId, $data);
+        $this->saveCustomFieldAnswers($studentId, $data);
 
         return Response::success($this->studentPayload($studentId), 'Student created.', 201);
     }
@@ -381,6 +390,7 @@ class StudentController
         $student->fill($payload);
         $student->save();
         $this->upsertStudentProfile($id, $data);
+        $this->saveCustomFieldAnswers($id, $data);
 
         return Response::success($this->studentPayload($id), 'Student updated.');
     }
@@ -429,7 +439,29 @@ class StudentController
              WHERE u.id = :id'
         );
         $stmt->execute(['id' => $id]);
-        return $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        if ($row) {
+            $cf = CustomFieldValue::getForUser($id);
+            foreach ($cf['answers'] as $k => $v) {
+                $row[$k] = $v;
+            }
+            $row['custom_field_values'] = $cf['by_name'];
+        }
+        return $row;
+    }
+
+    /**
+     * Persist any cf_{id} answers into custom_field_values table.
+     */
+    private function saveCustomFieldAnswers(int $userId, array $data): void
+    {
+        foreach ($data as $key => $val) {
+            if (str_starts_with($key, 'cf_') && is_numeric(substr($key, 3))) {
+                $cfId = (int) substr($key, 3);
+                $strVal = is_array($val) ? implode(', ', $val) : ($val !== null ? (string) $val : null);
+                CustomFieldValue::setValue($userId, $cfId, $strVal);
+            }
+        }
     }
 
     /**
