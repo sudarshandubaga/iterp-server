@@ -21,27 +21,27 @@ class FeeCollectionController
     protected function rules(): array
     {
         return [
-            'student_id'         => 'required|integer|exists:students,id',
-            'session_id'         => 'nullable|integer|exists:academic_years,id',
-            'firm_id'            => 'nullable|integer|exists:firms,id',
-            'receipt_no'         => 'required|string|max:100',
-            'payment_date'       => 'required|date',
-            'payment_mode'       => 'required|string|max:50',
-            'reference_no'       => 'nullable|string|max:100',
+            'student_id' => 'required|integer|exists:students,id',
+            'session_id' => 'nullable|integer|exists:academic_years,id',
+            'firm_id' => 'nullable|integer|exists:firms,id',
+            'receipt_no' => 'required|string|max:100',
+            'payment_date' => 'required|date',
+            'payment_mode' => 'required|string|max:50',
+            'reference_no' => 'nullable|string|max:100',
             'fee_bill_scheme_id' => 'nullable|integer|exists:fee_bill_schemes,id',
-            'concession_id'      => 'nullable|integer|exists:fee_concessions,id',
-            'subtotal_amount'    => 'required|numeric|min:0',
-            'concession_amount'  => 'nullable|numeric|min:0',
-            'discount_type'      => 'nullable|in:percentage,fixed',
-            'discount_value'     => 'nullable|numeric|min:0',
-            'discount_amount'    => 'nullable|numeric|min:0',
-            'discount_reason'    => 'nullable|string|max:255',
-            'total_amount'       => 'required|numeric|min:0',
-            'paid_amount'        => 'required|numeric|min:0',
-            'balance_amount'     => 'nullable|numeric|min:0',
-            'remarks'            => 'nullable|string',
-            'items'              => 'required|array',
-            'slab_ids'           => 'nullable|array',
+            'concession_id' => 'nullable|integer|exists:fee_concessions,id',
+            'subtotal_amount' => 'required|numeric|min:0',
+            'concession_amount' => 'nullable|numeric|min:0',
+            'discount_type' => 'nullable|in:percentage,fixed',
+            'discount_value' => 'nullable|numeric|min:0',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'discount_reason' => 'nullable|string|max:255',
+            'total_amount' => 'required|numeric|min:0',
+            'paid_amount' => 'required|numeric|min:0',
+            'balance_amount' => 'nullable|numeric|min:0',
+            'remarks' => 'nullable|string',
+            'items' => 'required|array',
+            'slab_ids' => 'nullable|array',
         ];
     }
 
@@ -212,26 +212,26 @@ class FeeCollectionController
 
             $stmt = $pdo->prepare($insertSql);
             $stmt->execute([
-                'firm_id'            => !empty($data['firm_id']) ? (int) $data['firm_id'] : null,
-                'session_id'         => !empty($data['session_id']) ? (int) $data['session_id'] : null,
-                'student_id'         => (int) $data['student_id'],
-                'receipt_no'         => (string) $data['receipt_no'],
-                'payment_date'       => (string) $data['payment_date'],
-                'payment_mode'       => (string) ($data['payment_mode'] ?? 'Cash'),
-                'reference_no'       => !empty($data['reference_no']) ? (string) $data['reference_no'] : null,
+                'firm_id' => !empty($data['firm_id']) ? (int) $data['firm_id'] : null,
+                'session_id' => !empty($data['session_id']) ? (int) $data['session_id'] : null,
+                'student_id' => (int) $data['student_id'],
+                'receipt_no' => (string) $data['receipt_no'],
+                'payment_date' => (string) $data['payment_date'],
+                'payment_mode' => (string) ($data['payment_mode'] ?? 'Cash'),
+                'reference_no' => !empty($data['reference_no']) ? (string) $data['reference_no'] : null,
                 'fee_bill_scheme_id' => !empty($data['fee_bill_scheme_id']) ? (int) $data['fee_bill_scheme_id'] : null,
-                'concession_id'      => !empty($data['concession_id']) ? (int) $data['concession_id'] : null,
-                'subtotal_amount'    => (float) ($data['subtotal_amount'] ?? 0),
-                'concession_amount'  => (float) ($data['concession_amount'] ?? 0),
-                'discount_type'      => !empty($data['discount_type']) ? (string) $data['discount_type'] : null,
-                'discount_value'     => (float) ($data['discount_value'] ?? 0),
-                'discount_amount'    => (float) ($data['discount_amount'] ?? 0),
-                'discount_reason'    => !empty($data['discount_reason']) ? (string) $data['discount_reason'] : null,
-                'total_amount'       => (float) ($data['total_amount'] ?? 0),
-                'paid_amount'        => (float) ($data['paid_amount'] ?? 0),
-                'balance_amount'     => (float) ($data['balance_amount'] ?? 0),
-                'remarks'            => !empty($data['remarks']) ? (string) $data['remarks'] : null,
-                'created_by'         => \Iterp\Core\Auth::user($request)?->id ?? null,
+                'concession_id' => !empty($data['concession_id']) ? (int) $data['concession_id'] : null,
+                'subtotal_amount' => (float) ($data['subtotal_amount'] ?? 0),
+                'concession_amount' => (float) ($data['concession_amount'] ?? 0),
+                'discount_type' => !empty($data['discount_type']) ? (string) $data['discount_type'] : null,
+                'discount_value' => (float) ($data['discount_value'] ?? 0),
+                'discount_amount' => (float) ($data['discount_amount'] ?? 0),
+                'discount_reason' => !empty($data['discount_reason']) ? (string) $data['discount_reason'] : null,
+                'total_amount' => (float) ($data['total_amount'] ?? 0),
+                'paid_amount' => (float) ($data['paid_amount'] ?? 0),
+                'balance_amount' => (float) ($data['balance_amount'] ?? 0),
+                'remarks' => !empty($data['remarks']) ? (string) $data['remarks'] : null,
+                'created_by' => \Iterp\Core\Auth::user($request)?->id ?? null,
             ]);
 
             $collectionId = (int) $pdo->lastInsertId();
@@ -290,13 +290,13 @@ class FeeCollectionController
 
                     $itemStmt->execute([
                         'fee_collection_id' => $collectionId,
-                        'slab_id'           => $targetSlabId,
-                        'fee_head_id'       => (int) $item['fee_head_id'],
-                        'amount'            => $headAmount,
-                        'concession'        => $headConcession,
-                        'discount_amount'   => $headDiscount,
-                        'total'             => $headTotal,
-                        'paid_amount'       => $headPaid,
+                        'slab_id' => $targetSlabId,
+                        'fee_head_id' => (int) $item['fee_head_id'],
+                        'amount' => $headAmount,
+                        'concession' => $headConcession,
+                        'discount_amount' => $headDiscount,
+                        'total' => $headTotal,
+                        'paid_amount' => $headPaid,
                     ]);
                 }
             }
@@ -310,7 +310,7 @@ class FeeCollectionController
                 foreach ($data['slab_ids'] as $slabId) {
                     $slabStmt->execute([
                         'fee_collection_id' => $collectionId,
-                        'slab_id'           => (int) $slabId,
+                        'slab_id' => (int) $slabId,
                     ]);
                 }
             }
@@ -416,8 +416,8 @@ class FeeCollectionController
         // Priority 3: Student's section assigned scheme (sec.fee_bill_scheme_id) -> Secondary priority
         // Priority 4: Fallback to the first available scheme
         $requestedSchemeId = (int) $request->query('fee_bill_scheme_id');
-        $studentSchemeId   = (int) ($student['assigned_scheme_id'] ?? 0);
-        $sectionSchemeId   = (int) ($student['section_scheme_id'] ?? 0);
+        $studentSchemeId = (int) ($student['assigned_scheme_id'] ?? 0);
+        $sectionSchemeId = (int) ($student['section_scheme_id'] ?? 0);
 
         $selectedSchemeId = 0;
         $schemeSource = 'default';
@@ -473,7 +473,7 @@ class FeeCollectionController
         $concessionMap = [];
         foreach ($concessionItems as $ci) {
             $concessionMap[(int) $ci['fee_head_id']] = [
-                'type'  => $ci['amount_type'],
+                'type' => $ci['amount_type'],
                 'value' => (float) $ci['amount_value'],
             ];
         }
@@ -494,7 +494,7 @@ class FeeCollectionController
 
             $amountsBySlabId = [];
             if (!empty($rawSlabs)) {
-                $slabIds = array_map(static fn ($r) => (int) $r['id'], $rawSlabs);
+                $slabIds = array_map(static fn($r) => (int) $r['id'], $rawSlabs);
                 $inPlaceholders = implode(',', array_fill(0, count($slabIds), '?'));
                 $amtStmt = $pdo->prepare(
                     "SELECT a.id, a.fee_bill_scheme_slab_id, a.fee_head_id, a.amount, fh.name AS fee_head_name
@@ -582,16 +582,16 @@ class FeeCollectionController
         $history = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 
         return Response::success([
-            'student'              => $student,
-            'schemes'              => $schemes,
-            'concessions'          => $concessions,
-            'active_scheme_id'     => $selectedSchemeId,
-            'scheme_source'        => $schemeSource,
-            'student_scheme_id'    => $studentSchemeId,
-            'section_scheme_id'    => $sectionSchemeId,
+            'student' => $student,
+            'schemes' => $schemes,
+            'concessions' => $concessions,
+            'active_scheme_id' => $selectedSchemeId,
+            'scheme_source' => $schemeSource,
+            'student_scheme_id' => $studentSchemeId,
+            'section_scheme_id' => $sectionSchemeId,
             'active_concession_id' => $selectedConcessionId,
-            'slabs'                => $slabs,
-            'past_collections'     => $history,
+            'slabs' => $slabs,
+            'past_collections' => $history,
         ]);
     }
 
@@ -683,13 +683,13 @@ class FeeCollectionController
 
         if (empty($students)) {
             return Response::success([
-                'items'   => [],
+                'items' => [],
                 'summary' => [
-                    'total_records'  => 0,
+                    'total_records' => 0,
                     'total_students' => 0,
-                    'total_due'      => 0,
+                    'total_due' => 0,
                     'overdue_amount' => 0,
-                    'overdue_count'  => 0,
+                    'overdue_count' => 0,
                 ],
             ]);
         }
@@ -773,7 +773,7 @@ class FeeCollectionController
             $ciStmt->execute($concessionIds);
             foreach ($ciStmt->fetchAll(PDO::FETCH_ASSOC) as $ci) {
                 $concessionMaps[(int) $ci['concession_id']][(int) $ci['fee_head_id']] = [
-                    'type'  => $ci['amount_type'],
+                    'type' => $ci['amount_type'],
                     'value' => (float) $ci['amount_value'],
                 ];
             }
@@ -920,32 +920,32 @@ class FeeCollectionController
                 }
 
                 $rows[] = [
-                    'student_id'        => $studentDbId,
-                    'user_id'           => $userDbId,
-                    'student_name'      => $fullName,
+                    'student_id' => $studentDbId,
+                    'user_id' => $userDbId,
+                    'student_name' => $fullName,
                     'enrollment_number' => $st['enrollment_number'],
-                    'scholar_number'    => $st['scholar_number'],
-                    'roll_number'       => $st['roll_number'],
-                    'class_id'          => $st['class_id'] ? (int) $st['class_id'] : null,
-                    'class_name'        => $st['class_name'],
-                    'section_id'        => $st['section_id'] ? (int) $st['section_id'] : null,
-                    'section_name'      => $st['section_name'],
-                    'father_name'       => $st['father_name'],
-                    'father_mobile_no'  => $st['father_mobile_no'],
-                    'mobile_no'         => $st['mobile_no'],
-                    'is_active'         => $st['is_active'] ?? 'y',
-                    'scheme_id'         => $schemeId,
-                    'scheme_name'       => $schemeNames[$schemeId] ?? null,
-                    'slab_id'           => $slab['id'],
-                    'slab_no'           => $slab['slab_no'],
-                    'due_date'          => $slab['due_date'],
-                    'total_amount'      => $slab['total'],
-                    'paid_amount'       => $slab['paid_amount'],
-                    'discount_amount'   => $slab['discount_amount'],
-                    'due_amount'        => $slab['balance'],
-                    'status'            => $slab['status'],
-                    'is_overdue'        => $slab['is_overdue'],
-                    'is_partial'        => $slab['is_partial'],
+                    'scholar_number' => $st['scholar_number'],
+                    'roll_number' => $st['roll_number'],
+                    'class_id' => $st['class_id'] ? (int) $st['class_id'] : null,
+                    'class_name' => $st['class_name'],
+                    'section_id' => $st['section_id'] ? (int) $st['section_id'] : null,
+                    'section_name' => $st['section_name'],
+                    'father_name' => $st['father_name'],
+                    'father_mobile_no' => $st['father_mobile_no'],
+                    'mobile_no' => $st['mobile_no'],
+                    'is_active' => $st['is_active'] ?? 'y',
+                    'scheme_id' => $schemeId,
+                    'scheme_name' => $schemeNames[$schemeId] ?? null,
+                    'slab_id' => $slab['id'],
+                    'slab_no' => $slab['slab_no'],
+                    'due_date' => $slab['due_date'],
+                    'total_amount' => $slab['total'],
+                    'paid_amount' => $slab['paid_amount'],
+                    'discount_amount' => $slab['discount_amount'],
+                    'due_amount' => $slab['balance'],
+                    'status' => $slab['status'],
+                    'is_overdue' => $slab['is_overdue'],
+                    'is_partial' => $slab['is_partial'],
                 ];
             }
         }
@@ -969,13 +969,13 @@ class FeeCollectionController
         });
 
         return Response::success([
-            'items'   => $rows,
+            'items' => $rows,
             'summary' => [
-                'total_records'  => count($rows),
+                'total_records' => count($rows),
                 'total_students' => count($uniqueStudentIds),
-                'total_due'      => round($totalDue, 2),
+                'total_due' => round($totalDue, 2),
                 'overdue_amount' => round($overdueAmount, 2),
-                'overdue_count'  => $overdueCount,
+                'overdue_count' => $overdueCount,
             ],
         ]);
     }
@@ -1119,11 +1119,11 @@ class FeeCollectionController
                 $slabConcession += $concessionAmt;
 
                 $slabHeadConfigs[] = [
-                    'fee_head_id'   => $headId,
+                    'fee_head_id' => $headId,
                     'fee_head_name' => $amt['fee_head_name'] ?: "Head #{$headId}",
-                    'amount'        => $baseAmt,
-                    'concession'    => $concessionAmt,
-                    'total'         => $netHeadAmt,
+                    'amount' => $baseAmt,
+                    'concession' => $concessionAmt,
+                    'total' => $netHeadAmt,
                 ];
             }
 
@@ -1200,15 +1200,15 @@ class FeeCollectionController
                 }
 
                 $slabProcessedAmounts[] = [
-                    'fee_head_id'     => $hId,
-                    'fee_head_name'   => $cfg['fee_head_name'],
-                    'amount'          => $cfg['amount'],
-                    'concession'      => $cfg['concession'],
-                    'total'           => $netHeadAmt,
-                    'paid_amount'     => $headPaid,
+                    'fee_head_id' => $hId,
+                    'fee_head_name' => $cfg['fee_head_name'],
+                    'amount' => $cfg['amount'],
+                    'concession' => $cfg['concession'],
+                    'total' => $netHeadAmt,
+                    'paid_amount' => $headPaid,
                     'discount_amount' => $headDiscount,
-                    'settled_amount'  => $headSettled,
-                    'balance'         => $headBalance,
+                    'settled_amount' => $headSettled,
+                    'balance' => $headBalance,
                 ];
             }
 
@@ -1217,22 +1217,22 @@ class FeeCollectionController
             $isOverdue = (!$isPaid && !empty($slab['due_date']) && $slab['due_date'] < $today);
 
             $slabs[] = [
-                'id'                 => $sId,
+                'id' => $sId,
                 'fee_bill_scheme_id' => (int) $slab['fee_bill_scheme_id'],
-                'slab_no'            => (int) $slab['slab_no'],
-                'due_date'           => $slab['due_date'],
-                'amounts'            => $slabProcessedAmounts,
-                'subtotal'           => $slabSubtotal,
-                'concession'         => $slabConcession,
-                'total'              => $slabNet,
-                'paid_amount'        => $slabPaidSoFar,
-                'discount_amount'    => $slabDiscountSoFar,
-                'settled_amount'     => $slabSettled,
-                'balance'            => $slabBalance,
-                'is_paid'            => $isPaid,
-                'is_partial'         => $isPartial,
-                'is_overdue'         => $isOverdue,
-                'status'             => $isPaid ? 'paid' : ($isPartial ? 'partial' : ($isOverdue ? 'overdue' : 'due')),
+                'slab_no' => (int) $slab['slab_no'],
+                'due_date' => $slab['due_date'],
+                'amounts' => $slabProcessedAmounts,
+                'subtotal' => $slabSubtotal,
+                'concession' => $slabConcession,
+                'total' => $slabNet,
+                'paid_amount' => $slabPaidSoFar,
+                'discount_amount' => $slabDiscountSoFar,
+                'settled_amount' => $slabSettled,
+                'balance' => $slabBalance,
+                'is_paid' => $isPaid,
+                'is_partial' => $isPartial,
+                'is_overdue' => $isOverdue,
+                'status' => $isPaid ? 'paid' : ($isPartial ? 'partial' : ($isOverdue ? 'overdue' : 'due')),
             ];
         }
 

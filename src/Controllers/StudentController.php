@@ -45,32 +45,32 @@ class StudentController
     {
         return [
             'academic_year_id' => 'nullable|integer|exists:academic_years,id',
-            'firm_id'          => 'nullable|integer|exists:firms,id',
-            'title_id'         => 'nullable|integer|exists:titles,id',
-            'section_id'       => 'nullable|integer|exists:sections,id',
-            'city_id'          => 'nullable|integer|exists:cities,id',
-            'first_name'       => 'required|string|max:255',
-            'last_name'        => 'nullable|string|max:255',
-            'username'         => 'required|string|max:150',
+            'firm_id' => 'nullable|integer|exists:firms,id',
+            'title_id' => 'nullable|integer|exists:titles,id',
+            'section_id' => 'nullable|integer|exists:sections,id',
+            'city_id' => 'nullable|integer|exists:cities,id',
+            'first_name' => 'required|string|max:255',
+            'last_name' => 'nullable|string|max:255',
+            'username' => 'required|string|max:150',
             // Optional for edits; store() enforces it for brand-new students.
-            'password'         => 'nullable|string|min:8|max:72',
-            'email'            => 'nullable|email|max:255',
-            'father_email'     => 'nullable|email|max:255',
-            'mobile_no'        => 'nullable|string|max:50',
+            'password' => 'nullable|string|min:8|max:72',
+            'email' => 'nullable|email|max:255',
+            'father_email' => 'nullable|email|max:255',
+            'mobile_no' => 'nullable|string|max:50',
             'father_mobile_no' => 'nullable|string|max:50',
-            'gender'           => 'nullable|in:m,f',
-            'dob'              => 'nullable|date',
-            'doj'              => 'nullable|date',
-            'is_active'        => 'nullable|in:y,n',
+            'gender' => 'nullable|in:m,f',
+            'dob' => 'nullable|date',
+            'doj' => 'nullable|date',
+            'is_active' => 'nullable|in:y,n',
             'enrollment_number' => 'nullable|string|max:100',
-            'scholar_number'    => 'nullable|string|max:100',
-            'roll_number'       => 'nullable|string|max:50',
-            'photo'             => 'nullable|string',
+            'scholar_number' => 'nullable|string|max:100',
+            'roll_number' => 'nullable|string|max:50',
+            'photo' => 'nullable|string',
             'student_category_id' => 'nullable|integer|exists:student_categories,id',
-            'fee_bill_scheme_id'  => 'nullable|integer|exists:fee_bill_schemes,id',
-            'fee_concession_id'   => 'nullable|integer|exists:fee_concessions,id',
+            'fee_bill_scheme_id' => 'nullable|integer|exists:fee_bill_schemes,id',
+            'fee_concession_id' => 'nullable|integer|exists:fee_concessions,id',
             'custom_field_category_id' => 'nullable|integer|exists:custom_field_categories,id',
-            'document_id'      => 'nullable|integer|exists:documents,id',
+            'document_id' => 'nullable|integer|exists:documents,id',
         ];
     }
 
@@ -214,8 +214,8 @@ class StudentController
                  LEFT JOIN registrations reg ON reg.student_id = s.id
                  INNER JOIN roles r ON r.id = u.role_id
                  WHERE r.name = :role AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
-                    . $this->buildStudentFilters(array_diff_key($bindings, ['role']))
-                    . ' ORDER BY u.first_name ASC LIMIT :limit OFFSET :offset'
+                . $this->buildStudentFilters(array_diff_key($bindings, ['role']))
+                . ' ORDER BY u.first_name ASC LIMIT :limit OFFSET :offset'
             );
             $stmt->bindValue(':limit', $perPage, \PDO::PARAM_INT);
             $stmt->bindValue(':offset', ($page - 1) * $perPage, \PDO::PARAM_INT);
@@ -225,10 +225,10 @@ class StudentController
             $stmt->execute();
 
             return Response::success([
-                'items'       => $stmt->fetchAll(\PDO::FETCH_ASSOC),
-                'total'       => $total,
-                'page'        => $page,
-                'per_page'    => $perPage,
+                'items' => $stmt->fetchAll(\PDO::FETCH_ASSOC),
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
                 'total_pages' => (int) ceil($total / $perPage),
             ]);
         }
@@ -267,8 +267,8 @@ class StudentController
              LEFT JOIN registrations reg ON reg.student_id = s.id
              INNER JOIN roles r ON r.id = u.role_id
              WHERE r.name = :role AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
-                . $this->buildStudentFilters(array_diff_key($bindings, ['role']))
-                . ' ORDER BY u.first_name ASC LIMIT 1000'
+            . $this->buildStudentFilters(array_diff_key($bindings, ['role']))
+            . ' ORDER BY u.first_name ASC LIMIT 1000'
         );
         $stmt->execute($bindings);
 
@@ -280,14 +280,30 @@ class StudentController
         $id = (int) $params['id'];
         $stmt = Database::pdo()->prepare(
             'SELECT u.id, u.first_name, u.middle_name, u.last_name, u.username,
-                    u.title_id, u.gender, u.dob, u.doj, u.email, u.mobile_no,
-                    u.city_id, u.academic_year_id, u.firm_id, u.custom_field_category_id,
-                    u.document_id, u.is_active,
+                    u.title_id, t.name AS title_name,
+                    u.gender, u.dob, u.doj, u.email, u.mobile_no,
+                    u.city_id, c.name AS city_name, st.name AS state_name, co.name AS country_name,
+                    COALESCE(s.academic_year_id, u.academic_year_id) AS academic_year_id,
+                    ay.name AS academic_year_name,
+                    u.firm_id, f.name AS firm_name,
+                    u.custom_field_category_id, cfc.name AS custom_field_category_name,
+                    u.document_id, doc.name AS document_name,
+                    u.is_active,
                     s.id AS student_id, s.enrollment_number, s.scholar_number, s.roll_number,
                     s.father_email, s.father_mobile_no, s.photo, s.section_id,
-                    s.fee_bill_scheme_id, s.fee_concession_id,
+                    s.fee_bill_scheme_id, fbs.name AS fee_bill_scheme_name,
+                    sec.fee_bill_scheme_id AS section_fee_bill_scheme_id,
+                    sec_fbs.name AS section_fee_bill_scheme_name,
+                    s.fee_concession_id, fc.name AS fee_concession_name,
                     s.student_category_id, sc.name AS student_category_name,
                     sec.name AS section_name, sec.class_id, ac.name AS class_name,
+                    reg.registration_no, reg.admission_no, reg.admission_date,
+                    reg.mother_name, reg.father_occupation, reg.mother_occupation, reg.mother_mobile_no,
+                    reg.guardian_name, reg.guardian_relation, reg.guardian_mobile_no,
+                    reg.address AS registration_address, reg.pincode,
+                    reg.blood_group, reg.religion, reg.nationality, reg.aadhaar_no,
+                    reg.previous_school, reg.previous_class, reg.previous_marks_percentage,
+                    reg.transfer_certificate_no,
                     COALESCE(
                         NULLIF(reg.father_name, \'\'),
                         (SELECT cfv.value
@@ -300,13 +316,31 @@ class StudentController
                     ) AS father_name
              FROM users u
              LEFT JOIN students s ON s.user_id = u.id
+             LEFT JOIN titles t ON t.id = u.title_id
+             LEFT JOIN cities c ON c.id = u.city_id
+             LEFT JOIN states st ON st.id = c.state_id
+             LEFT JOIN countries co ON co.id = st.country_id
+             LEFT JOIN academic_years ay ON ay.id = COALESCE(s.academic_year_id, u.academic_year_id)
+             LEFT JOIN firms f ON f.id = u.firm_id
+             LEFT JOIN custom_field_categories cfc ON cfc.id = u.custom_field_category_id
+             LEFT JOIN documents doc ON doc.id = u.document_id
              LEFT JOIN student_categories sc ON sc.id = s.student_category_id
              LEFT JOIN sections sec ON sec.id = s.section_id
              LEFT JOIN academic_classes ac ON ac.id = sec.class_id
+             LEFT JOIN fee_bill_schemes fbs ON fbs.id = s.fee_bill_scheme_id
+             LEFT JOIN fee_bill_schemes sec_fbs ON sec_fbs.id = sec.fee_bill_scheme_id
+             LEFT JOIN fee_concessions fc ON fc.id = s.fee_concession_id
              LEFT JOIN registrations reg ON reg.student_id = s.id
-             WHERE (u.id = :id_u OR s.id = :id_s) AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)'
+             WHERE (u.id = :id_u OR s.id = :id_s) AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)
+             ORDER BY (u.id = :id_ord AND s.id IS NOT NULL) DESC, (u.id = :id_ord2) DESC
+             LIMIT 1'
         );
-        $stmt->execute(['id_u' => $id, 'id_s' => $id]);
+        $stmt->execute([
+            'id_u' => $id,
+            'id_s' => $id,
+            'id_ord' => $id,
+            'id_ord2' => $id,
+        ]);
         $student = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($student) {
             $cf = CustomFieldValue::getForUser((int) $student['id']);
@@ -338,24 +372,24 @@ class StudentController
 
         $student = new Student();
         $student->fill([
-            'first_name'       => $data['first_name'],
-            'middle_name'      => $data['middle_name'] ?? null,
-            'last_name'        => $data['last_name'] ?? null,
-            'username'         => $data['username'],
-            'password'         => password_hash((string) $data['password'], PASSWORD_DEFAULT),
-            'title_id'         => $data['title_id'] ?? null,
-            'gender'           => $data['gender'] ?? null,
-            'dob'              => $data['dob'] ?? null,
-            'doj'              => $data['doj'] ?? null,
-            'email'            => $data['email'] ?? null,
-            'mobile_no'        => $data['mobile_no'] ?? null,
-            'city_id'          => $data['city_id'] ?? null,
+            'first_name' => $data['first_name'],
+            'middle_name' => $data['middle_name'] ?? null,
+            'last_name' => $data['last_name'] ?? null,
+            'username' => $data['username'],
+            'password' => password_hash((string) $data['password'], PASSWORD_DEFAULT),
+            'title_id' => $data['title_id'] ?? null,
+            'gender' => $data['gender'] ?? null,
+            'dob' => $data['dob'] ?? null,
+            'doj' => $data['doj'] ?? null,
+            'email' => $data['email'] ?? null,
+            'mobile_no' => $data['mobile_no'] ?? null,
+            'city_id' => $data['city_id'] ?? null,
             'academic_year_id' => $data['academic_year_id'] ?? null,
-            'firm_id'          => $data['firm_id'] ?? null,
+            'firm_id' => $data['firm_id'] ?? null,
             'custom_field_category_id' => $data['custom_field_category_id'] ?? null,
-            'document_id'      => $data['document_id'] ?? null,
-            'role_id'          => $this->studentRoleId(),
-            'is_active'        => $data['is_active'] ?? 'y',
+            'document_id' => $data['document_id'] ?? null,
+            'role_id' => $this->studentRoleId(),
+            'is_active' => $data['is_active'] ?? 'y',
         ]);
 
         if (!$student->save()) {
@@ -393,22 +427,22 @@ class StudentController
         // Build the payload explicitly so an empty/absent password is never
         // written over the existing (hashed) one on edit.
         $payload = [
-            'first_name'       => $data['first_name'],
-            'middle_name'      => $data['middle_name'] ?? null,
-            'last_name'        => $data['last_name'] ?? null,
-            'username'         => $data['username'],
-            'title_id'         => array_key_exists('title_id', $data) ? $data['title_id'] : $student->title_id ?? null,
-            'gender'           => $data['gender'] ?? $student->gender ?? null,
-            'dob'              => array_key_exists('dob', $data) ? $data['dob'] : $student->dob ?? null,
-            'doj'              => array_key_exists('doj', $data) ? $data['doj'] : $student->doj ?? null,
-            'email'            => $data['email'] ?? null,
-            'mobile_no'        => $data['mobile_no'] ?? null,
-            'city_id'          => array_key_exists('city_id', $data) ? $data['city_id'] : $student->city_id ?? null,
+            'first_name' => $data['first_name'],
+            'middle_name' => $data['middle_name'] ?? null,
+            'last_name' => $data['last_name'] ?? null,
+            'username' => $data['username'],
+            'title_id' => array_key_exists('title_id', $data) ? $data['title_id'] : $student->title_id ?? null,
+            'gender' => $data['gender'] ?? $student->gender ?? null,
+            'dob' => array_key_exists('dob', $data) ? $data['dob'] : $student->dob ?? null,
+            'doj' => array_key_exists('doj', $data) ? $data['doj'] : $student->doj ?? null,
+            'email' => $data['email'] ?? null,
+            'mobile_no' => $data['mobile_no'] ?? null,
+            'city_id' => array_key_exists('city_id', $data) ? $data['city_id'] : $student->city_id ?? null,
             'academic_year_id' => $data['academic_year_id'] ?? $student->academic_year_id ?? null,
-            'firm_id'          => array_key_exists('firm_id', $data) ? $data['firm_id'] : $student->firm_id ?? null,
+            'firm_id' => array_key_exists('firm_id', $data) ? $data['firm_id'] : $student->firm_id ?? null,
             'custom_field_category_id' => $data['custom_field_category_id'] ?? $student->custom_field_category_id ?? null,
-            'document_id'      => $data['document_id'] ?? $student->document_id ?? null,
-            'is_active'        => $data['is_active'] ?? $student->is_active ?? 'y',
+            'document_id' => $data['document_id'] ?? $student->document_id ?? null,
+            'is_active' => $data['is_active'] ?? $student->is_active ?? 'y',
         ];
         if (!empty($data['password']) && strlen((string) $data['password']) >= 8) {
             $payload['password'] = (string) $data['password']; // hashed by User::save()
@@ -539,16 +573,16 @@ class StudentController
                 updated_at          = NOW()"
         );
         $stmt->execute([
-            'user_id'    => $userId,
-            'enr'        => $enr,
-            'sch'        => $sch,
-            'roll'       => $data['roll_number'] ?? null,
-            'femail'     => $data['father_email'] ?? null,
-            'fmobile'    => $data['father_mobile_no'] ?? null,
-            'photo'      => $photoPath,
-            'section'    => !empty($data['section_id']) ? (int) $data['section_id'] : null,
-            'category'   => !empty($data['student_category_id']) ? (int) $data['student_category_id'] : null,
-            'scheme'     => !empty($data['fee_bill_scheme_id']) ? (int) $data['fee_bill_scheme_id'] : null,
+            'user_id' => $userId,
+            'enr' => $enr,
+            'sch' => $sch,
+            'roll' => $data['roll_number'] ?? null,
+            'femail' => $data['father_email'] ?? null,
+            'fmobile' => $data['father_mobile_no'] ?? null,
+            'photo' => $photoPath,
+            'section' => !empty($data['section_id']) ? (int) $data['section_id'] : null,
+            'category' => !empty($data['student_category_id']) ? (int) $data['student_category_id'] : null,
+            'scheme' => !empty($data['fee_bill_scheme_id']) ? (int) $data['fee_bill_scheme_id'] : null,
             'concession' => !empty($data['fee_concession_id']) ? (int) $data['fee_concession_id'] : null,
         ]);
     }
