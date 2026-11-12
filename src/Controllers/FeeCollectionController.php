@@ -490,14 +490,23 @@ class FeeCollectionController
             $slabStmt->execute(['scheme_id' => $selectedSchemeId]);
             $rawSlabs = $slabStmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Auto-ensure discount_amount exists on fee_collection_items table
-            try {
-                $hasDiscCol = (bool) $pdo->query("SHOW COLUMNS FROM fee_collection_items LIKE 'discount_amount'")->fetch();
-                if (!$hasDiscCol) {
-                    $pdo->exec("ALTER TABLE fee_collection_items ADD COLUMN discount_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER concession");
+            $this->ensureDiscountColumn($pdo);
+
+            $amountsBySlabId = [];
+            if (!empty($rawSlabs)) {
+                $slabIds = array_map(static fn ($r) => (int) $r['id'], $rawSlabs);
+                $inPlaceholders = implode(',', array_fill(0, count($slabIds), '?'));
+                $amtStmt = $pdo->prepare(
+                    "SELECT a.id, a.fee_bill_scheme_slab_id, a.fee_head_id, a.amount, fh.name AS fee_head_name
+                     FROM fee_bill_scheme_amounts a
+                     LEFT JOIN fee_heads fh ON fh.id = a.fee_head_id
+                     WHERE a.fee_bill_scheme_slab_id IN ({$inPlaceholders})
+                     ORDER BY a.id ASC"
+                );
+                $amtStmt->execute($slabIds);
+                foreach ($amtStmt->fetchAll(PDO::FETCH_ASSOC) as $amt) {
+                    $amountsBySlabId[(int) $amt['fee_bill_scheme_slab_id']][] = $amt;
                 }
-            } catch (\Throwable $e) {
-                // ignore
             }
 
             $studentDbId = (int) ($student['student_id'] ?? $student['id'] ?? $studentId);
@@ -550,248 +559,14 @@ class FeeCollectionController
                 $itemsByCol[$cId][] = $item;
             }
 
-            // Aggregators for payments and discounts
-            $paidBySlabHead = [];
-            $discountBySlabHead = [];
-            $paidBySlab = [];
-            $discountBySlab = [];
-            $unassignedPaid = 0.0;
-            $unassignedDiscount = 0.0;
-
-            foreach ($pastCollections as $pc) {
-                $cId = (int) $pc['id'];
-                $cPaid = (float) ($pc['paid_amount'] ?? 0);
-                $cDiscount = (float) ($pc['discount_amount'] ?? 0);
-                $slabsForCol = $colToSlabs[$cId] ?? [];
-                $itemsForCol = $itemsByCol[$cId] ?? [];
-
-                if (empty($slabsForCol) && empty($itemsForCol)) {
-                    $unassignedPaid += $cPaid;
-                    $unassignedDiscount += $cDiscount;
-                    continue;
-                }
-
-                $itemDiscountSum = 0.0;
-                $itemNetSum = 0.0;
-                foreach ($itemsForCol as $it) {
-                    $itemDiscountSum += (float) ($it['discount_amount'] ?? 0);
-                    $itemNetSum += max(0.0, (float) ($it['total'] ?? $it['amount'] ?? 0));
-                }
-
-                $needDistributeDiscount = ($cDiscount > 0.001 && $itemDiscountSum <= 0.001);
-                $remDiscountToDistribute = $cDiscount;
-                $itCount = count($itemsForCol);
-                $colAllocatedPaidToSlabs = 0.0;
-                $colAllocatedDiscToSlabs = 0.0;
-
-                foreach ($itemsForCol as $idx => $it) {
-                    $slabId = !empty($it['fee_bill_scheme_slab_id']) ? (int) $it['fee_bill_scheme_slab_id'] : 0;
-                    if ($slabId === 0 && count($slabsForCol) === 1) {
-                        $slabId = $slabsForCol[0];
-                    }
-
-                    $headId = (int) $it['fee_head_id'];
-                    $paid = (float) ($it['paid_amount'] ?? 0);
-                    $disc = (float) ($it['discount_amount'] ?? 0);
-
-                    if ($needDistributeDiscount) {
-                        if ($idx === $itCount - 1) {
-                            $disc = max(0.0, $remDiscountToDistribute);
-                        } else {
-                            $headNet = max(0.0, (float) ($it['total'] ?? $it['amount'] ?? 0));
-                            $share = $itemNetSum > 0 ? ($headNet / $itemNetSum) : (1.0 / max(1, $itCount));
-                            $disc = round($cDiscount * $share, 2);
-                            $remDiscountToDistribute -= $disc;
-                        }
-                    }
-
-                    if ($slabId > 0) {
-                        $paidBySlabHead[$slabId][$headId] = ($paidBySlabHead[$slabId][$headId] ?? 0.0) + $paid;
-                        $discountBySlabHead[$slabId][$headId] = ($discountBySlabHead[$slabId][$headId] ?? 0.0) + $disc;
-
-                        $paidBySlab[$slabId] = ($paidBySlab[$slabId] ?? 0.0) + $paid;
-                        $discountBySlab[$slabId] = ($discountBySlab[$slabId] ?? 0.0) + $disc;
-
-                        $colAllocatedPaidToSlabs += $paid;
-                        $colAllocatedDiscToSlabs += $disc;
-                    }
-                }
-
-                // If collection had slabs linked but no items, attribute evenly to slabs
-                $remColPaid = max(0.0, round($cPaid - $colAllocatedPaidToSlabs, 2));
-                $remColDisc = max(0.0, round($cDiscount - $colAllocatedDiscToSlabs, 2));
-
-                if (!empty($slabsForCol) && ($remColPaid > 0.001 || $remColDisc > 0.001)) {
-                    $numSlabs = count($slabsForCol);
-                    $eachPaid = round($remColPaid / $numSlabs, 2);
-                    $eachDisc = round($remColDisc / $numSlabs, 2);
-                    foreach ($slabsForCol as $sId) {
-                        $paidBySlab[$sId] = ($paidBySlab[$sId] ?? 0.0) + $eachPaid;
-                        $discountBySlab[$sId] = ($discountBySlab[$sId] ?? 0.0) + $eachDisc;
-                    }
-                } elseif (empty($slabsForCol) && ($remColPaid > 0.001 || $remColDisc > 0.001)) {
-                    $unassignedPaid += $remColPaid;
-                    $unassignedDiscount += $remColDisc;
-                }
-            }
-
-            foreach ($rawSlabs as $slab) {
-                $sId = (int) $slab['id'];
-
-                // Load fee head amounts for this slab
-                $amtStmt = $pdo->prepare(
-                    'SELECT a.id, a.fee_head_id, a.amount, fh.name AS fee_head_name
-                     FROM fee_bill_scheme_amounts a
-                     LEFT JOIN fee_heads fh ON fh.id = a.fee_head_id
-                     WHERE a.fee_bill_scheme_slab_id = :slab_id
-                     ORDER BY a.id ASC'
-                );
-                $amtStmt->execute(['slab_id' => $sId]);
-                $amounts = $amtStmt->fetchAll(PDO::FETCH_ASSOC);
-
-                $slabSubtotal = 0.0;
-                $slabConcession = 0.0;
-                $slabHeadConfigs = [];
-
-                foreach ($amounts as $amt) {
-                    $headId = (int) $amt['fee_head_id'];
-                    $baseAmt = (float) $amt['amount'];
-                    $concessionAmt = 0.0;
-
-                    if (isset($concessionMap[$headId])) {
-                        $rule = $concessionMap[$headId];
-                        if (strcasecmp($rule['type'], 'Percentage') === 0) {
-                            $concessionAmt = round(($baseAmt * $rule['value']) / 100.0, 2);
-                        } else {
-                            $concessionAmt = min($baseAmt, (float) $rule['value']);
-                        }
-                    }
-
-                    $netHeadAmt = max(0.0, round($baseAmt - $concessionAmt, 2));
-                    $slabSubtotal += $baseAmt;
-                    $slabConcession += $concessionAmt;
-
-                    $slabHeadConfigs[] = [
-                        'fee_head_id'   => $headId,
-                        'fee_head_name' => $amt['fee_head_name'] ?: "Head #{$headId}",
-                        'amount'        => $baseAmt,
-                        'concession'    => $concessionAmt,
-                        'total'         => $netHeadAmt,
-                    ];
-                }
-
-                $slabNet = max(0.0, round($slabSubtotal - $slabConcession, 2));
-                $slabPaidSoFar = round($paidBySlab[$sId] ?? 0.0, 2);
-                $slabDiscountSoFar = round($discountBySlab[$sId] ?? 0.0, 2);
-
-                // FIFO absorption of unassigned past collections if any
-                $currentSlabSettled = round($slabPaidSoFar + $slabDiscountSoFar, 2);
-                $remCapacity = max(0.0, round($slabNet - $currentSlabSettled, 2));
-
-                if ($remCapacity > 0.001 && ($unassignedDiscount > 0.001 || $unassignedPaid > 0.001)) {
-                    if ($unassignedDiscount > 0.001) {
-                        $takeDisc = min($remCapacity, $unassignedDiscount);
-                        $slabDiscountSoFar += $takeDisc;
-                        $unassignedDiscount = max(0.0, round($unassignedDiscount - $takeDisc, 2));
-                        $remCapacity = max(0.0, round($remCapacity - $takeDisc, 2));
-                    }
-                    if ($remCapacity > 0.001 && $unassignedPaid > 0.001) {
-                        $takePaid = min($remCapacity, $unassignedPaid);
-                        $slabPaidSoFar += $takePaid;
-                        $unassignedPaid = max(0.0, round($unassignedPaid - $takePaid, 2));
-                        $remCapacity = max(0.0, round($remCapacity - $takePaid, 2));
-                    }
-                }
-
-                // Bound slab settled and balance
-                $slabSettled = min($slabNet, round($slabPaidSoFar + $slabDiscountSoFar, 2));
-                $slabBalance = max(0.0, round($slabNet - $slabSettled, 2));
-
-                // Process fee heads for this slab
-                $sumExplicitHeadSettled = 0.0;
-                foreach ($slabHeadConfigs as $cfg) {
-                    $hId = $cfg['fee_head_id'];
-                    $hP = (float) ($paidBySlabHead[$sId][$hId] ?? 0.0);
-                    $hD = (float) ($discountBySlabHead[$sId][$hId] ?? 0.0);
-                    $sumExplicitHeadSettled += ($hP + $hD);
-                }
-
-                $useExplicit = ($sumExplicitHeadSettled > 0.001 && abs($sumExplicitHeadSettled - $slabSettled) < 0.05);
-
-                $slabProcessedAmounts = [];
-                $headCount = count($slabHeadConfigs);
-                $allocatedHeadPaid = 0.0;
-                $allocatedHeadDisc = 0.0;
-                $allocatedHeadSettled = 0.0;
-                $allocatedHeadBalance = 0.0;
-
-                foreach ($slabHeadConfigs as $idx => $cfg) {
-                    $hId = $cfg['fee_head_id'];
-                    $netHeadAmt = $cfg['total'];
-
-                    if ($useExplicit) {
-                        $headPaid = round($paidBySlabHead[$sId][$hId] ?? 0.0, 2);
-                        $headDiscount = round($discountBySlabHead[$sId][$hId] ?? 0.0, 2);
-                        $headSettled = round($headPaid + $headDiscount, 2);
-                        $headBalance = max(0.0, round($netHeadAmt - $headSettled, 2));
-                    } else {
-                        if ($idx === $headCount - 1) {
-                            $headPaid = max(0.0, round($slabPaidSoFar - $allocatedHeadPaid, 2));
-                            $headDiscount = max(0.0, round($slabDiscountSoFar - $allocatedHeadDisc, 2));
-                            $headSettled = max(0.0, round($slabSettled - $allocatedHeadSettled, 2));
-                            $headBalance = max(0.0, round($slabBalance - $allocatedHeadBalance, 2));
-                        } else {
-                            $share = $slabNet > 0.001 ? ($netHeadAmt / $slabNet) : (1.0 / max(1, $headCount));
-                            $headPaid = min($netHeadAmt, round($slabPaidSoFar * $share, 2));
-                            $headDiscount = min(max(0.0, $netHeadAmt - $headPaid), round($slabDiscountSoFar * $share, 2));
-                            $headSettled = round($headPaid + $headDiscount, 2);
-                            $headBalance = max(0.0, round($netHeadAmt - $headSettled, 2));
-
-                            $allocatedHeadPaid += $headPaid;
-                            $allocatedHeadDisc += $headDiscount;
-                            $allocatedHeadSettled += $headSettled;
-                            $allocatedHeadBalance += $headBalance;
-                        }
-                    }
-
-                    $slabProcessedAmounts[] = [
-                        'fee_head_id'     => $hId,
-                        'fee_head_name'   => $cfg['fee_head_name'],
-                        'amount'          => $cfg['amount'],
-                        'concession'      => $cfg['concession'],
-                        'total'           => $netHeadAmt,
-                        'paid_amount'     => $headPaid,
-                        'discount_amount' => $headDiscount,
-                        'settled_amount'  => $headSettled,
-                        'balance'         => $headBalance,
-                    ];
-                }
-
-                $isPaid = ($slabBalance <= 0.001 && $slabNet > 0);
-                $isPartial = ($slabSettled > 0.001 && $slabBalance > 0.001);
-
-                $today = date('Y-m-d');
-                $isOverdue = (!$isPaid && !empty($slab['due_date']) && $slab['due_date'] < $today);
-
-                $slabs[] = [
-                    'id'                 => $sId,
-                    'fee_bill_scheme_id' => (int) $slab['fee_bill_scheme_id'],
-                    'slab_no'            => (int) $slab['slab_no'],
-                    'due_date'           => $slab['due_date'],
-                    'amounts'            => $slabProcessedAmounts,
-                    'subtotal'           => $slabSubtotal,
-                    'concession'         => $slabConcession,
-                    'total'              => $slabNet,
-                    'paid_amount'        => $slabPaidSoFar,
-                    'discount_amount'    => $slabDiscountSoFar,
-                    'settled_amount'     => $slabSettled,
-                    'balance'            => $slabBalance,
-                    'is_paid'            => $isPaid,
-                    'is_partial'         => $isPartial,
-                    'is_overdue'         => $isOverdue,
-                    'status'             => $isPaid ? 'paid' : ($isPartial ? 'partial' : ($isOverdue ? 'overdue' : 'due')),
-                ];
-            }
+            $slabs = $this->computeStudentSlabs(
+                $rawSlabs,
+                $amountsBySlabId,
+                $concessionMap,
+                $pastCollections,
+                $colToSlabs,
+                $itemsByCol
+            );
         }
 
         // 6. Recent collections for this student
@@ -803,7 +578,7 @@ class FeeCollectionController
              WHERE (student_id = :sid1 OR student_id = :sid2) AND deleted_at IS NULL
              ORDER BY id DESC LIMIT 10'
         );
-        $historyStmt->execute(['sid1' => $studentDbId, 'sid2' => $userDbId]);
+        $historyStmt->execute(['sid1' => $studentDbId ?? 0, 'sid2' => $userDbId ?? 0]);
         $history = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 
         return Response::success([
@@ -818,5 +593,649 @@ class FeeCollectionController
             'slabs'                => $slabs,
             'past_collections'     => $history,
         ]);
+    }
+
+    /**
+     * Installment-wise Due Fee Report across all matching students.
+     */
+    public function dueReport(Request $request): Response
+    {
+        $pdo = Database::pdo();
+        $this->ensureDiscountColumn($pdo);
+
+        $bindings = [];
+        $where = "WHERE r.name = 'Student' AND u.deleted_at IS NULL AND (s.deleted_at IS NULL OR s.id IS NULL)";
+
+        $firmId = $request->query('firm_id');
+        if ($firmId !== null && $firmId !== '') {
+            $bindings['firm_id'] = (int) $firmId;
+            $where .= ' AND u.firm_id = :firm_id';
+        }
+
+        $sessionId = $request->query('session_id') ?? $request->query('academic_year_id');
+        if ($sessionId !== null && $sessionId !== '') {
+            $bindings['session_id'] = (int) $sessionId;
+            $where .= ' AND COALESCE(s.academic_year_id, u.academic_year_id) = :session_id';
+        }
+
+        $classId = $request->query('class_id');
+        if ($classId !== null && $classId !== '') {
+            $bindings['class_id'] = (int) $classId;
+            $where .= ' AND sec.class_id = :class_id';
+        }
+
+        $sectionId = $request->query('section_id');
+        if ($sectionId !== null && $sectionId !== '') {
+            $bindings['section_id'] = (int) $sectionId;
+            $where .= ' AND s.section_id = :section_id';
+        }
+
+        $schemeFilter = $request->query('fee_bill_scheme_id');
+        if ($schemeFilter !== null && $schemeFilter !== '') {
+            $bindings['scheme_id'] = (int) $schemeFilter;
+            $where .= ' AND COALESCE(s.fee_bill_scheme_id, sec.fee_bill_scheme_id) = :scheme_id';
+        } else {
+            $where .= ' AND COALESCE(s.fee_bill_scheme_id, sec.fee_bill_scheme_id) IS NOT NULL';
+        }
+
+        $search = $request->query('search');
+        if ($search !== null && trim((string) $search) !== '') {
+            $term = '%' . trim((string) $search) . '%';
+            $bindings['s1'] = $term;
+            $bindings['s2'] = $term;
+            $bindings['s3'] = $term;
+            $bindings['s4'] = $term;
+            $bindings['s5'] = $term;
+            $bindings['s6'] = $term;
+            $where .= " AND (u.first_name LIKE :s1 OR u.last_name LIKE :s2 OR s.enrollment_number LIKE :s3 OR s.father_mobile_no LIKE :s4 OR u.mobile_no LIKE :s5 OR reg.father_name LIKE :s6)";
+        }
+
+        $sql = "SELECT s.id AS student_id, s.user_id,
+                       s.enrollment_number, s.scholar_number, s.roll_number,
+                       s.father_mobile_no, u.mobile_no, u.is_active,
+                       u.first_name, u.middle_name, u.last_name,
+                       s.section_id, sec.name AS section_name,
+                       sec.class_id, ac.name AS class_name,
+                       COALESCE(s.fee_bill_scheme_id, sec.fee_bill_scheme_id) AS active_scheme_id,
+                       s.fee_concession_id AS active_concession_id,
+                       COALESCE(
+                           NULLIF(reg.father_name, ''),
+                           (SELECT cfv.value
+                            FROM custom_field_values cfv
+                            INNER JOIN custom_fields cf ON cf.id = cfv.custom_field_id
+                            WHERE cfv.user_id = u.id
+                              AND LOWER(TRIM(cf.name)) IN ('father name', 'fathers name', 'father_name')
+                              AND cf.deleted_at IS NULL
+                            LIMIT 1)
+                       ) AS father_name
+                FROM users u
+                INNER JOIN roles r ON r.id = u.role_id
+                LEFT JOIN students s ON s.user_id = u.id
+                LEFT JOIN sections sec ON sec.id = s.section_id
+                LEFT JOIN academic_classes ac ON ac.id = sec.class_id
+                LEFT JOIN registrations reg ON reg.student_id = s.id
+                {$where}
+                ORDER BY ac.name ASC, sec.name ASC, u.first_name ASC";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($bindings);
+        $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($students)) {
+            return Response::success([
+                'items'   => [],
+                'summary' => [
+                    'total_records'  => 0,
+                    'total_students' => 0,
+                    'total_due'      => 0,
+                    'overdue_amount' => 0,
+                    'overdue_count'  => 0,
+                ],
+            ]);
+        }
+
+        // Collect batch IDs
+        $schemeIds = [];
+        $concessionIds = [];
+        $studentKeyIds = [];
+        foreach ($students as $st) {
+            $scId = (int) ($st['active_scheme_id'] ?? 0);
+            if ($scId > 0) {
+                $schemeIds[$scId] = $scId;
+            }
+            $cId = (int) ($st['active_concession_id'] ?? 0);
+            if ($cId > 0) {
+                $concessionIds[$cId] = $cId;
+            }
+            if (!empty($st['student_id'])) {
+                $studentKeyIds[(int) $st['student_id']] = (int) $st['student_id'];
+            }
+            if (!empty($st['user_id'])) {
+                $studentKeyIds[(int) $st['user_id']] = (int) $st['user_id'];
+            }
+        }
+
+        $schemeIds = array_values($schemeIds);
+        $concessionIds = array_values($concessionIds);
+        $studentKeyIds = array_values($studentKeyIds);
+
+        // Batch-fetch scheme names & slabs
+        $schemeNames = [];
+        $slabsByScheme = [];
+        $allSlabIds = [];
+        if (!empty($schemeIds)) {
+            $ph = implode(',', array_fill(0, count($schemeIds), '?'));
+            $scStmt = $pdo->prepare("SELECT id, name FROM fee_bill_schemes WHERE id IN ({$ph})");
+            $scStmt->execute($schemeIds);
+            foreach ($scStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $schemeNames[(int) $row['id']] = $row['name'];
+            }
+
+            $slStmt = $pdo->prepare(
+                "SELECT id, fee_bill_scheme_id, slab_no, due_date
+                 FROM fee_bill_scheme_slabs
+                 WHERE fee_bill_scheme_id IN ({$ph})
+                 ORDER BY fee_bill_scheme_id ASC, slab_no ASC"
+            );
+            $slStmt->execute($schemeIds);
+            foreach ($slStmt->fetchAll(PDO::FETCH_ASSOC) as $slab) {
+                $slabsByScheme[(int) $slab['fee_bill_scheme_id']][] = $slab;
+                $allSlabIds[] = (int) $slab['id'];
+            }
+        }
+
+        // Batch-fetch slab amounts
+        $amountsBySlabId = [];
+        if (!empty($allSlabIds)) {
+            $ph = implode(',', array_fill(0, count($allSlabIds), '?'));
+            $amtStmt = $pdo->prepare(
+                "SELECT a.id, a.fee_bill_scheme_slab_id, a.fee_head_id, a.amount, fh.name AS fee_head_name
+                 FROM fee_bill_scheme_amounts a
+                 LEFT JOIN fee_heads fh ON fh.id = a.fee_head_id
+                 WHERE a.fee_bill_scheme_slab_id IN ({$ph})
+                 ORDER BY a.id ASC"
+            );
+            $amtStmt->execute($allSlabIds);
+            foreach ($amtStmt->fetchAll(PDO::FETCH_ASSOC) as $amt) {
+                $amountsBySlabId[(int) $amt['fee_bill_scheme_slab_id']][] = $amt;
+            }
+        }
+
+        // Batch-fetch concession maps
+        $concessionMaps = [];
+        if (!empty($concessionIds)) {
+            $ph = implode(',', array_fill(0, count($concessionIds), '?'));
+            $ciStmt = $pdo->prepare(
+                "SELECT concession_id, fee_head_id, amount_type, amount_value
+                 FROM fee_concession_items
+                 WHERE concession_id IN ({$ph})"
+            );
+            $ciStmt->execute($concessionIds);
+            foreach ($ciStmt->fetchAll(PDO::FETCH_ASSOC) as $ci) {
+                $concessionMaps[(int) $ci['concession_id']][(int) $ci['fee_head_id']] = [
+                    'type'  => $ci['amount_type'],
+                    'value' => (float) $ci['amount_value'],
+                ];
+            }
+        }
+
+        // Batch-fetch past collections, slab links, and items
+        $collectionsByStudentKey = [];
+        $allCollectionIds = [];
+        if (!empty($studentKeyIds)) {
+            $ph = implode(',', array_fill(0, count($studentKeyIds), '?'));
+            $colStmt = $pdo->prepare(
+                "SELECT fc.id, fc.student_id, fc.discount_amount, fc.subtotal_amount,
+                        fc.total_amount, fc.paid_amount, fc.balance_amount, fc.payment_date
+                 FROM fee_collections fc
+                 WHERE fc.student_id IN ({$ph}) AND fc.deleted_at IS NULL
+                 ORDER BY fc.payment_date ASC, fc.id ASC"
+            );
+            $colStmt->execute($studentKeyIds);
+            foreach ($colStmt->fetchAll(PDO::FETCH_ASSOC) as $pc) {
+                $collectionsByStudentKey[(int) $pc['student_id']][] = $pc;
+                $allCollectionIds[] = (int) $pc['id'];
+            }
+        }
+
+        $colToSlabs = [];
+        $itemsByCol = [];
+        if (!empty($allCollectionIds)) {
+            $ph = implode(',', array_fill(0, count($allCollectionIds), '?'));
+            $slLinkStmt = $pdo->prepare(
+                "SELECT fee_collection_id, fee_bill_scheme_slab_id
+                 FROM fee_collection_slabs
+                 WHERE fee_collection_id IN ({$ph})"
+            );
+            $slLinkStmt->execute($allCollectionIds);
+            foreach ($slLinkStmt->fetchAll(PDO::FETCH_ASSOC) as $link) {
+                $colToSlabs[(int) $link['fee_collection_id']][] = (int) $link['fee_bill_scheme_slab_id'];
+            }
+
+            $itStmt = $pdo->prepare(
+                "SELECT id, fee_collection_id, fee_bill_scheme_slab_id,
+                        fee_head_id, amount, concession, discount_amount,
+                        total, paid_amount
+                 FROM fee_collection_items
+                 WHERE fee_collection_id IN ({$ph})"
+            );
+            $itStmt->execute($allCollectionIds);
+            foreach ($itStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+                $itemsByCol[(int) $item['fee_collection_id']][] = $item;
+            }
+        }
+
+        // Filters applied on computed installment rows
+        $slabNoFilter = $request->query('slab_no');
+        $statusFilter = $request->query('status');
+        $dueFrom = $request->query('due_from');
+        $dueTo = $request->query('due_to');
+
+        $rows = [];
+        $uniqueStudentIds = [];
+        $totalDue = 0.0;
+        $overdueAmount = 0.0;
+        $overdueCount = 0;
+
+        foreach ($students as $st) {
+            $schemeId = (int) ($st['active_scheme_id'] ?? 0);
+            $rawSlabs = $slabsByScheme[$schemeId] ?? [];
+            if (empty($rawSlabs)) {
+                continue;
+            }
+
+            $studentDbId = (int) ($st['student_id'] ?? 0);
+            $userDbId = (int) ($st['user_id'] ?? 0);
+            $concessionId = (int) ($st['active_concession_id'] ?? 0);
+            $concessionMap = $concessionMaps[$concessionId] ?? [];
+
+            // Merge & deduplicate past collections for dual ID matching
+            $mergedCols = [];
+            $seenColIds = [];
+            foreach ([$studentDbId, $userDbId] as $kId) {
+                if ($kId <= 0 || empty($collectionsByStudentKey[$kId])) {
+                    continue;
+                }
+                foreach ($collectionsByStudentKey[$kId] as $pc) {
+                    $cId = (int) $pc['id'];
+                    if (!isset($seenColIds[$cId])) {
+                        $seenColIds[$cId] = true;
+                        $mergedCols[] = $pc;
+                    }
+                }
+            }
+            if (count($mergedCols) > 1) {
+                usort($mergedCols, static function ($a, $b) {
+                    $cmp = strcmp((string) ($a['payment_date'] ?? ''), (string) ($b['payment_date'] ?? ''));
+                    return $cmp !== 0 ? $cmp : ((int) $a['id'] <=> (int) $b['id']);
+                });
+            }
+
+            $computedSlabs = $this->computeStudentSlabs(
+                $rawSlabs,
+                $amountsBySlabId,
+                $concessionMap,
+                $mergedCols,
+                $colToSlabs,
+                $itemsByCol
+            );
+
+            $fullName = trim(implode(' ', array_filter([
+                $st['first_name'] ?? '',
+                $st['middle_name'] ?? '',
+                $st['last_name'] ?? '',
+            ])));
+
+            foreach ($computedSlabs as $slab) {
+                if ($slab['balance'] <= 0.001) {
+                    continue;
+                }
+                if ($slabNoFilter !== null && $slabNoFilter !== '' && (int) $slabNoFilter !== (int) $slab['slab_no']) {
+                    continue;
+                }
+                if ($statusFilter !== null && $statusFilter !== '' && $statusFilter !== 'all') {
+                    if ($statusFilter === 'overdue' && !$slab['is_overdue']) {
+                        continue;
+                    }
+                    if ($statusFilter === 'partial' && !$slab['is_partial']) {
+                        continue;
+                    }
+                    if ($statusFilter === 'due' && $slab['status'] !== 'due') {
+                        continue;
+                    }
+                }
+                if ($dueFrom && !empty($slab['due_date']) && $slab['due_date'] < $dueFrom) {
+                    continue;
+                }
+                if ($dueTo && !empty($slab['due_date']) && $slab['due_date'] > $dueTo) {
+                    continue;
+                }
+
+                $stKey = $studentDbId ?: $userDbId;
+                $uniqueStudentIds[$stKey] = true;
+                $totalDue += (float) $slab['balance'];
+                if ($slab['is_overdue']) {
+                    $overdueAmount += (float) $slab['balance'];
+                    $overdueCount++;
+                }
+
+                $rows[] = [
+                    'student_id'        => $studentDbId,
+                    'user_id'           => $userDbId,
+                    'student_name'      => $fullName,
+                    'enrollment_number' => $st['enrollment_number'],
+                    'scholar_number'    => $st['scholar_number'],
+                    'roll_number'       => $st['roll_number'],
+                    'class_id'          => $st['class_id'] ? (int) $st['class_id'] : null,
+                    'class_name'        => $st['class_name'],
+                    'section_id'        => $st['section_id'] ? (int) $st['section_id'] : null,
+                    'section_name'      => $st['section_name'],
+                    'father_name'       => $st['father_name'],
+                    'father_mobile_no'  => $st['father_mobile_no'],
+                    'mobile_no'         => $st['mobile_no'],
+                    'is_active'         => $st['is_active'] ?? 'y',
+                    'scheme_id'         => $schemeId,
+                    'scheme_name'       => $schemeNames[$schemeId] ?? null,
+                    'slab_id'           => $slab['id'],
+                    'slab_no'           => $slab['slab_no'],
+                    'due_date'          => $slab['due_date'],
+                    'total_amount'      => $slab['total'],
+                    'paid_amount'       => $slab['paid_amount'],
+                    'discount_amount'   => $slab['discount_amount'],
+                    'due_amount'        => $slab['balance'],
+                    'status'            => $slab['status'],
+                    'is_overdue'        => $slab['is_overdue'],
+                    'is_partial'        => $slab['is_partial'],
+                ];
+            }
+        }
+
+        usort($rows, static function ($a, $b) {
+            $da = $a['due_date'] ?: '9999-12-31';
+            $db = $b['due_date'] ?: '9999-12-31';
+            $cmp = strcmp($da, $db);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            $cmp = strcmp((string) ($a['class_name'] ?? ''), (string) ($b['class_name'] ?? ''));
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            $cmp = strcmp((string) ($a['student_name'] ?? ''), (string) ($b['student_name'] ?? ''));
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+            return ((int) $a['slab_no']) <=> ((int) $b['slab_no']);
+        });
+
+        return Response::success([
+            'items'   => $rows,
+            'summary' => [
+                'total_records'  => count($rows),
+                'total_students' => count($uniqueStudentIds),
+                'total_due'      => round($totalDue, 2),
+                'overdue_amount' => round($overdueAmount, 2),
+                'overdue_count'  => $overdueCount,
+            ],
+        ]);
+    }
+
+    protected function ensureDiscountColumn(PDO $pdo): void
+    {
+        try {
+            $hasDiscCol = (bool) $pdo->query("SHOW COLUMNS FROM fee_collection_items LIKE 'discount_amount'")->fetch();
+            if (!$hasDiscCol) {
+                $pdo->exec("ALTER TABLE fee_collection_items ADD COLUMN discount_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER concession");
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+    }
+
+    /**
+     * Compute per-slab amounts, payments, discounts, and balances for a student.
+     */
+    protected function computeStudentSlabs(
+        array $rawSlabs,
+        array $amountsBySlabId,
+        array $concessionMap,
+        array $pastCollections,
+        array $colToSlabs,
+        array $itemsByCol
+    ): array {
+        $slabs = [];
+
+        // Aggregators for payments and discounts
+        $paidBySlabHead = [];
+        $discountBySlabHead = [];
+        $paidBySlab = [];
+        $discountBySlab = [];
+        $unassignedPaid = 0.0;
+        $unassignedDiscount = 0.0;
+
+        foreach ($pastCollections as $pc) {
+            $cId = (int) $pc['id'];
+            $cPaid = (float) ($pc['paid_amount'] ?? 0);
+            $cDiscount = (float) ($pc['discount_amount'] ?? 0);
+            $slabsForCol = $colToSlabs[$cId] ?? [];
+            $itemsForCol = $itemsByCol[$cId] ?? [];
+
+            if (empty($slabsForCol) && empty($itemsForCol)) {
+                $unassignedPaid += $cPaid;
+                $unassignedDiscount += $cDiscount;
+                continue;
+            }
+
+            $itemDiscountSum = 0.0;
+            $itemNetSum = 0.0;
+            foreach ($itemsForCol as $it) {
+                $itemDiscountSum += (float) ($it['discount_amount'] ?? 0);
+                $itemNetSum += max(0.0, (float) ($it['total'] ?? $it['amount'] ?? 0));
+            }
+
+            $needDistributeDiscount = ($cDiscount > 0.001 && $itemDiscountSum <= 0.001);
+            $remDiscountToDistribute = $cDiscount;
+            $itCount = count($itemsForCol);
+            $colAllocatedPaidToSlabs = 0.0;
+            $colAllocatedDiscToSlabs = 0.0;
+
+            foreach ($itemsForCol as $idx => $it) {
+                $slabId = !empty($it['fee_bill_scheme_slab_id']) ? (int) $it['fee_bill_scheme_slab_id'] : 0;
+                if ($slabId === 0 && count($slabsForCol) === 1) {
+                    $slabId = $slabsForCol[0];
+                }
+
+                $headId = (int) $it['fee_head_id'];
+                $paid = (float) ($it['paid_amount'] ?? 0);
+                $disc = (float) ($it['discount_amount'] ?? 0);
+
+                if ($needDistributeDiscount) {
+                    if ($idx === $itCount - 1) {
+                        $disc = max(0.0, $remDiscountToDistribute);
+                    } else {
+                        $headNet = max(0.0, (float) ($it['total'] ?? $it['amount'] ?? 0));
+                        $share = $itemNetSum > 0 ? ($headNet / $itemNetSum) : (1.0 / max(1, $itCount));
+                        $disc = round($cDiscount * $share, 2);
+                        $remDiscountToDistribute -= $disc;
+                    }
+                }
+
+                if ($slabId > 0) {
+                    $paidBySlabHead[$slabId][$headId] = ($paidBySlabHead[$slabId][$headId] ?? 0.0) + $paid;
+                    $discountBySlabHead[$slabId][$headId] = ($discountBySlabHead[$slabId][$headId] ?? 0.0) + $disc;
+
+                    $paidBySlab[$slabId] = ($paidBySlab[$slabId] ?? 0.0) + $paid;
+                    $discountBySlab[$slabId] = ($discountBySlab[$slabId] ?? 0.0) + $disc;
+
+                    $colAllocatedPaidToSlabs += $paid;
+                    $colAllocatedDiscToSlabs += $disc;
+                }
+            }
+
+            // If collection had slabs linked but no items, attribute evenly to slabs
+            $remColPaid = max(0.0, round($cPaid - $colAllocatedPaidToSlabs, 2));
+            $remColDisc = max(0.0, round($cDiscount - $colAllocatedDiscToSlabs, 2));
+
+            if (!empty($slabsForCol) && ($remColPaid > 0.001 || $remColDisc > 0.001)) {
+                $numSlabs = count($slabsForCol);
+                $eachPaid = round($remColPaid / $numSlabs, 2);
+                $eachDisc = round($remColDisc / $numSlabs, 2);
+                foreach ($slabsForCol as $sId) {
+                    $paidBySlab[$sId] = ($paidBySlab[$sId] ?? 0.0) + $eachPaid;
+                    $discountBySlab[$sId] = ($discountBySlab[$sId] ?? 0.0) + $eachDisc;
+                }
+            } elseif (empty($slabsForCol) && ($remColPaid > 0.001 || $remColDisc > 0.001)) {
+                $unassignedPaid += $remColPaid;
+                $unassignedDiscount += $remColDisc;
+            }
+        }
+
+        $today = date('Y-m-d');
+
+        foreach ($rawSlabs as $slab) {
+            $sId = (int) $slab['id'];
+            $amounts = $amountsBySlabId[$sId] ?? [];
+
+            $slabSubtotal = 0.0;
+            $slabConcession = 0.0;
+            $slabHeadConfigs = [];
+
+            foreach ($amounts as $amt) {
+                $headId = (int) $amt['fee_head_id'];
+                $baseAmt = (float) $amt['amount'];
+                $concessionAmt = 0.0;
+
+                if (isset($concessionMap[$headId])) {
+                    $rule = $concessionMap[$headId];
+                    if (strcasecmp($rule['type'], 'Percentage') === 0) {
+                        $concessionAmt = round(($baseAmt * $rule['value']) / 100.0, 2);
+                    } else {
+                        $concessionAmt = min($baseAmt, (float) $rule['value']);
+                    }
+                }
+
+                $netHeadAmt = max(0.0, round($baseAmt - $concessionAmt, 2));
+                $slabSubtotal += $baseAmt;
+                $slabConcession += $concessionAmt;
+
+                $slabHeadConfigs[] = [
+                    'fee_head_id'   => $headId,
+                    'fee_head_name' => $amt['fee_head_name'] ?: "Head #{$headId}",
+                    'amount'        => $baseAmt,
+                    'concession'    => $concessionAmt,
+                    'total'         => $netHeadAmt,
+                ];
+            }
+
+            $slabNet = max(0.0, round($slabSubtotal - $slabConcession, 2));
+            $slabPaidSoFar = round($paidBySlab[$sId] ?? 0.0, 2);
+            $slabDiscountSoFar = round($discountBySlab[$sId] ?? 0.0, 2);
+
+            // FIFO absorption of unassigned past collections if any
+            $currentSlabSettled = round($slabPaidSoFar + $slabDiscountSoFar, 2);
+            $remCapacity = max(0.0, round($slabNet - $currentSlabSettled, 2));
+
+            if ($remCapacity > 0.001 && ($unassignedDiscount > 0.001 || $unassignedPaid > 0.001)) {
+                if ($unassignedDiscount > 0.001) {
+                    $takeDisc = min($remCapacity, $unassignedDiscount);
+                    $slabDiscountSoFar += $takeDisc;
+                    $unassignedDiscount = max(0.0, round($unassignedDiscount - $takeDisc, 2));
+                    $remCapacity = max(0.0, round($remCapacity - $takeDisc, 2));
+                }
+                if ($remCapacity > 0.001 && $unassignedPaid > 0.001) {
+                    $takePaid = min($remCapacity, $unassignedPaid);
+                    $slabPaidSoFar += $takePaid;
+                    $unassignedPaid = max(0.0, round($unassignedPaid - $takePaid, 2));
+                    $remCapacity = max(0.0, round($remCapacity - $takePaid, 2));
+                }
+            }
+
+            $slabSettled = min($slabNet, round($slabPaidSoFar + $slabDiscountSoFar, 2));
+            $slabBalance = max(0.0, round($slabNet - $slabSettled, 2));
+
+            $sumExplicitHeadSettled = 0.0;
+            foreach ($slabHeadConfigs as $cfg) {
+                $hId = $cfg['fee_head_id'];
+                $hP = (float) ($paidBySlabHead[$sId][$hId] ?? 0.0);
+                $hD = (float) ($discountBySlabHead[$sId][$hId] ?? 0.0);
+                $sumExplicitHeadSettled += ($hP + $hD);
+            }
+
+            $useExplicit = ($sumExplicitHeadSettled > 0.001 && abs($sumExplicitHeadSettled - $slabSettled) < 0.05);
+
+            $slabProcessedAmounts = [];
+            $headCount = count($slabHeadConfigs);
+            $allocatedHeadPaid = 0.0;
+            $allocatedHeadDisc = 0.0;
+            $allocatedHeadSettled = 0.0;
+            $allocatedHeadBalance = 0.0;
+
+            foreach ($slabHeadConfigs as $idx => $cfg) {
+                $hId = $cfg['fee_head_id'];
+                $netHeadAmt = $cfg['total'];
+
+                if ($useExplicit) {
+                    $headPaid = round($paidBySlabHead[$sId][$hId] ?? 0.0, 2);
+                    $headDiscount = round($discountBySlabHead[$sId][$hId] ?? 0.0, 2);
+                    $headSettled = round($headPaid + $headDiscount, 2);
+                    $headBalance = max(0.0, round($netHeadAmt - $headSettled, 2));
+                } else {
+                    if ($idx === $headCount - 1) {
+                        $headPaid = max(0.0, round($slabPaidSoFar - $allocatedHeadPaid, 2));
+                        $headDiscount = max(0.0, round($slabDiscountSoFar - $allocatedHeadDisc, 2));
+                        $headSettled = max(0.0, round($slabSettled - $allocatedHeadSettled, 2));
+                        $headBalance = max(0.0, round($slabBalance - $allocatedHeadBalance, 2));
+                    } else {
+                        $share = $slabNet > 0.001 ? ($netHeadAmt / $slabNet) : (1.0 / max(1, $headCount));
+                        $headPaid = min($netHeadAmt, round($slabPaidSoFar * $share, 2));
+                        $headDiscount = min(max(0.0, $netHeadAmt - $headPaid), round($slabDiscountSoFar * $share, 2));
+                        $headSettled = round($headPaid + $headDiscount, 2);
+                        $headBalance = max(0.0, round($netHeadAmt - $headSettled, 2));
+
+                        $allocatedHeadPaid += $headPaid;
+                        $allocatedHeadDisc += $headDiscount;
+                        $allocatedHeadSettled += $headSettled;
+                        $allocatedHeadBalance += $headBalance;
+                    }
+                }
+
+                $slabProcessedAmounts[] = [
+                    'fee_head_id'     => $hId,
+                    'fee_head_name'   => $cfg['fee_head_name'],
+                    'amount'          => $cfg['amount'],
+                    'concession'      => $cfg['concession'],
+                    'total'           => $netHeadAmt,
+                    'paid_amount'     => $headPaid,
+                    'discount_amount' => $headDiscount,
+                    'settled_amount'  => $headSettled,
+                    'balance'         => $headBalance,
+                ];
+            }
+
+            $isPaid = ($slabBalance <= 0.001 && $slabNet > 0);
+            $isPartial = ($slabSettled > 0.001 && $slabBalance > 0.001);
+            $isOverdue = (!$isPaid && !empty($slab['due_date']) && $slab['due_date'] < $today);
+
+            $slabs[] = [
+                'id'                 => $sId,
+                'fee_bill_scheme_id' => (int) $slab['fee_bill_scheme_id'],
+                'slab_no'            => (int) $slab['slab_no'],
+                'due_date'           => $slab['due_date'],
+                'amounts'            => $slabProcessedAmounts,
+                'subtotal'           => $slabSubtotal,
+                'concession'         => $slabConcession,
+                'total'              => $slabNet,
+                'paid_amount'        => $slabPaidSoFar,
+                'discount_amount'    => $slabDiscountSoFar,
+                'settled_amount'     => $slabSettled,
+                'balance'            => $slabBalance,
+                'is_paid'            => $isPaid,
+                'is_partial'         => $isPartial,
+                'is_overdue'         => $isOverdue,
+                'status'             => $isPaid ? 'paid' : ($isPartial ? 'partial' : ($isOverdue ? 'overdue' : 'due')),
+            ];
+        }
+
+        return $slabs;
     }
 }

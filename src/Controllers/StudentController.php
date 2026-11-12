@@ -194,7 +194,16 @@ class StudentController
                         sec_fbs.name AS section_fee_bill_scheme_name,
                         s.student_category_id, sc.name AS student_category_name,
                         sec.name AS section_name, sec.class_id, ac.name AS class_name,
-                        reg.father_name
+                        COALESCE(
+                            NULLIF(reg.father_name, \'\'),
+                            (SELECT cfv.value
+                             FROM custom_field_values cfv
+                             INNER JOIN custom_fields cf ON cf.id = cfv.custom_field_id
+                             WHERE cfv.user_id = u.id
+                               AND LOWER(TRIM(cf.name)) IN (\'father name\', \'fathers name\', \'father_name\')
+                               AND cf.deleted_at IS NULL
+                             LIMIT 1)
+                        ) AS father_name
                  FROM users u
                  LEFT JOIN students s ON s.user_id = u.id
                  LEFT JOIN student_categories sc ON sc.id = s.student_category_id
@@ -238,7 +247,16 @@ class StudentController
                     sec_fbs.name AS section_fee_bill_scheme_name,
                     s.student_category_id, sc.name AS student_category_name,
                     sec.name AS section_name, sec.class_id, ac.name AS class_name,
-                    reg.father_name
+                    COALESCE(
+                        NULLIF(reg.father_name, \'\'),
+                        (SELECT cfv.value
+                         FROM custom_field_values cfv
+                         INNER JOIN custom_fields cf ON cf.id = cfv.custom_field_id
+                         WHERE cfv.user_id = u.id
+                           AND LOWER(TRIM(cf.name)) IN (\'father name\', \'fathers name\', \'father_name\')
+                           AND cf.deleted_at IS NULL
+                         LIMIT 1)
+                    ) AS father_name
              FROM users u
              LEFT JOIN students s ON s.user_id = u.id
              LEFT JOIN student_categories sc ON sc.id = s.student_category_id
@@ -270,7 +288,16 @@ class StudentController
                     s.fee_bill_scheme_id, s.fee_concession_id,
                     s.student_category_id, sc.name AS student_category_name,
                     sec.name AS section_name, sec.class_id, ac.name AS class_name,
-                    reg.father_name
+                    COALESCE(
+                        NULLIF(reg.father_name, \'\'),
+                        (SELECT cfv.value
+                         FROM custom_field_values cfv
+                         INNER JOIN custom_fields cf ON cf.id = cfv.custom_field_id
+                         WHERE cfv.user_id = u.id
+                           AND LOWER(TRIM(cf.name)) IN (\'father name\', \'fathers name\', \'father_name\')
+                           AND cf.deleted_at IS NULL
+                         LIMIT 1)
+                    ) AS father_name
              FROM users u
              LEFT JOIN students s ON s.user_id = u.id
              LEFT JOIN student_categories sc ON sc.id = s.student_category_id

@@ -105,6 +105,7 @@ $resources = [
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
 $router->get('/api/fee-collections/student-dues',         [$locale . 'FeeCollectionController', 'studentDues'], $authOnly);
+$router->get('/api/fee-collections/due-report',           [$locale . 'FeeCollectionController', 'dueReport'], $authOnly);
 
 // Fee bill scheme assignments custom routes
 $router->get('/api/fee-bill-schemes/{id}/assignments',     [$locale . 'FeeBillSchemeController', 'getAssignments'], $authOnly);
