@@ -215,9 +215,8 @@ class ExamMarkController
         $sec = $secStmt->fetch(\PDO::FETCH_ASSOC);
         $classId = $sec ? (int) $sec['class_id'] : null;
 
-        $pdo->beginTransaction();
-
         try {
+            $pdo->beginTransaction();
             $upsertSql = "INSERT INTO exam_marks (exam_id, academic_class_id, section_id, subject_id, student_id, min_marks, max_marks, obtained_marks, attendance, remarks, created_at, updated_at)
                           VALUES (:exam_id, :class_id, :section_id, :subject_id, :student_id, :min_marks, :max_marks, :obtained_marks, :attendance, :remarks, NOW(), NOW())
                           ON DUPLICATE KEY UPDATE
@@ -268,14 +267,18 @@ class ExamMarkController
                 $savedCount++;
             }
 
-            $pdo->commit();
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
 
             return Response::success([
                 'message'     => 'Marks saved successfully.',
                 'saved_count' => $savedCount,
             ]);
         } catch (Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             return Response::error('Failed to save marks: ' . $e->getMessage(), 500);
         }
     }

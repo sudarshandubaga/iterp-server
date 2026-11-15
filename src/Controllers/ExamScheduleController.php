@@ -219,9 +219,9 @@ class ExamScheduleController
         }
 
         $pdo = Database::pdo();
-        $pdo->beginTransaction();
 
         try {
+            $pdo->beginTransaction();
             $insertStmt = $pdo->prepare("INSERT INTO exam_schedules (exam_id, academic_class_id, section_id, subject_id, exam_date, start_time, end_time, room_no, min_marks, max_marks, created_at, updated_at)
                                          VALUES (:exam_id, :academic_class_id, :section_id, :subject_id, :exam_date, :start_time, :end_time, :room_no, :min_marks, :max_marks, NOW(), NOW())");
 
@@ -279,10 +279,14 @@ class ExamScheduleController
                 $savedCount++;
             }
 
-            $pdo->commit();
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
             return Response::success(['message' => 'Exam schedules saved successfully.', 'saved_count' => $savedCount]);
         } catch (Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             return Response::error('Failed to batch save schedule: ' . $e->getMessage(), 500);
         }
     }

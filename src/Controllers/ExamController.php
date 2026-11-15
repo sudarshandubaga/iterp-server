@@ -135,9 +135,10 @@ class ExamController
         }
 
         $pdo = Database::pdo();
-        $pdo->beginTransaction();
 
         try {
+            $pdo->beginTransaction();
+
             $stmt = $pdo->prepare("INSERT INTO exams (academic_year_id, exam_type_id, name, start_date, end_date, status, description, firm_id, created_at, updated_at)
                                    VALUES (:academic_year_id, :exam_type_id, :name, :start_date, :end_date, :status, :description, :firm_id, NOW(), NOW())");
             $stmt->execute([
@@ -158,11 +159,15 @@ class ExamController
                 $this->saveSectionAllocations($pdo, $examId, $data['section_ids']);
             }
 
-            $pdo->commit();
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
 
             return Response::success(['id' => $examId, 'message' => 'Exam created successfully.'], 201);
         } catch (Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             return Response::error('Failed to create exam: ' . $e->getMessage(), 500);
         }
     }
@@ -188,9 +193,10 @@ class ExamController
         }
 
         $pdo = Database::pdo();
-        $pdo->beginTransaction();
 
         try {
+            $pdo->beginTransaction();
+
             $stmt = $pdo->prepare("UPDATE exams SET academic_year_id = :academic_year_id,
                                                    exam_type_id = :exam_type_id,
                                                    name = :name,
@@ -218,11 +224,15 @@ class ExamController
                 $this->saveSectionAllocations($pdo, $id, $data['section_ids']);
             }
 
-            $pdo->commit();
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
 
             return Response::success(['id' => $id, 'message' => 'Exam updated successfully.']);
         } catch (Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             return Response::error('Failed to update exam: ' . $e->getMessage(), 500);
         }
     }
@@ -327,17 +337,21 @@ class ExamController
             ? array_filter(array_map('intval', $data['section_ids']))
             : [];
 
-        $pdo->beginTransaction();
         try {
+            $pdo->beginTransaction();
             $this->saveSectionAllocations($pdo, $id, $sectionIds);
-            $pdo->commit();
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
 
             return Response::success([
                 'message'                  => 'Class allocations saved successfully.',
                 'allocated_sections_count' => count($sectionIds),
             ]);
         } catch (Throwable $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             return Response::error('Failed to save allocations: ' . $e->getMessage(), 500);
         }
     }
