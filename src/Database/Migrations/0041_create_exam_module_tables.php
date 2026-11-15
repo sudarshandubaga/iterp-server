@@ -15,7 +15,7 @@ use Iterp\Core\Migration;
  * - exam_schedules: Exam timetable/schedule per exam, class/section & subject (dates, times, min/max marks)
  * - exam_marks: Student marks entries per exam, subject, and student (obtained marks, attendance, remarks)
  */
-class CreateExamModuleTables extends Migration
+class CreateExamModuleTablesTable extends Migration
 {
     public function up(): void
     {
