@@ -100,7 +100,21 @@ $resources = [
     'fee-concessions'        => 'FeeConcessionController',
     'concessions'            => 'FeeConcessionController',
     'fee-collections'        => 'FeeCollectionController',
+    // Examination Module
+    'exam-types'             => 'ExamTypeController',
+    'exam-subjects'          => 'ExamSubjectController',
+    'exams'                  => 'ExamController',
+    'exam-schedules'         => 'ExamScheduleController',
 ];
+
+// Examination Module custom routes
+$router->get('/api/exams/{id}/allocations',                [$locale . 'ExamController', 'getAllocations'], $authOnly);
+$router->post('/api/exams/{id}/allocations',               [$locale . 'ExamController', 'saveAllocations'], $authOnly);
+$router->post('/api/exam-schedules/batch-save',             [$locale . 'ExamScheduleController', 'batchSave'], $authOnly);
+$router->get('/api/exam-marks/entry-sheet',                [$locale . 'ExamMarkController', 'entrySheet'], $authOnly);
+$router->post('/api/exam-marks/batch-save',                [$locale . 'ExamMarkController', 'batchSave'], $authOnly);
+$router->get('/api/exam-marks/result-sheet',               [$locale . 'ExamMarkController', 'resultSheet'], $authOnly);
+$router->get('/api/exam-marks/marksheet-data',             [$locale . 'ExamMarkController', 'marksheetData'], $authOnly);
 
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
