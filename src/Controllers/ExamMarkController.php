@@ -582,7 +582,11 @@ class ExamMarkController
 
         // Reuse resultSheet calculation logic for full consistency
         $resultResp = $this->resultSheet($request);
-        $resultData = json_decode($resultResp->getBody(), true);
+        if ($resultResp->getStatus() >= 400) {
+            return $resultResp;
+        }
+        $body = $resultResp->getBody();
+        $resultData = is_array($body) ? $body : (is_string($body) ? (json_decode($body, true) ?: []) : []);
         $allStudents = $resultData['data']['students'] ?? [];
         $subjectsList = $resultData['data']['subjects'] ?? [];
 
