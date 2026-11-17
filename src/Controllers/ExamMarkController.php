@@ -632,20 +632,66 @@ class ExamMarkController
             }
         }
 
-        // 3. Multi-term exams for this Academic Year and Section
+        // 3. Multi-term exams for this Academic Year and Section (Ordered manually by sort_order)
         $ayId = (int) $exam['academic_year_id'];
-        $ayExamsStmt = $pdo->prepare("SELECT e.id, e.name, e.start_date, et.name AS type_name, et.short_name AS type_short_name
+        $ayExamsStmt = $pdo->prepare("SELECT e.id, e.name, e.start_date, e.sort_order, et.name AS type_name, et.short_name AS type_short_name
                                       FROM exams e
                                       LEFT JOIN exam_types et ON et.id = e.exam_type_id
                                       WHERE e.academic_year_id = :ay_id AND e.deleted_at IS NULL
-                                      ORDER BY e.start_date ASC, e.id ASC");
+                                      ORDER BY e.sort_order ASC, e.start_date ASC, e.id ASC");
         $ayExamsStmt->execute(['ay_id' => $ayId]);
         $sessionExams = $ayExamsStmt->fetchAll(\PDO::FETCH_ASSOC);
 
+        // Ensure current exam is included in sessionExams if not found
+        $hasCurrentExam = false;
+        foreach ($sessionExams as $se) {
+            if ((int) $se['id'] === $examId) {
+                $hasCurrentExam = true;
+                break;
+            }
+        }
+        if (!$hasCurrentExam) {
+            $sessionExams[] = [
+                'id'              => (int) $exam['id'],
+                'name'            => $exam['name'],
+                'start_date'      => $exam['start_date'] ?? '',
+                'sort_order'      => (int) ($exam['sort_order'] ?? 0),
+                'type_name'       => $exam['exam_type_name'] ?? '',
+                'type_short_name' => '',
+            ];
+            usort($sessionExams, function ($a, $b) {
+                $ordA = (int) ($a['sort_order'] ?? 0);
+                $ordB = (int) ($b['sort_order'] ?? 0);
+                if ($ordA !== $ordB) return $ordA <=> $ordB;
+                return strcmp((string) ($a['start_date'] ?? ''), (string) ($b['start_date'] ?? ''));
+            });
+        }
+
+        // Optional exam_ids filter: user can request single or multiple specific exams
+        $requestedExamIdsParam = $request->query('exam_ids');
+        if (!empty($requestedExamIdsParam)) {
+            $allowedExamIds = array_filter(array_map('intval', is_array($requestedExamIdsParam) ? $requestedExamIdsParam : explode(',', (string) $requestedExamIdsParam)));
+            if (!empty($allowedExamIds)) {
+                $sessionExams = array_values(array_filter($sessionExams, fn($se) => in_array((int) $se['id'], $allowedExamIds, true)));
+            }
+        }
+
+        $cleanSessionExams = [];
+        foreach ($sessionExams as $se) {
+            $cleanSessionExams[] = [
+                'id'              => (int) $se['id'],
+                'name'            => $se['name'],
+                'start_date'      => $se['start_date'] ?? '',
+                'sort_order'      => (int) ($se['sort_order'] ?? 0),
+                'type_name'       => $se['type_name'] ?? '',
+                'type_short_name' => $se['type_short_name'] ?? '',
+            ];
+        }
+
         // Fetch marks for this section across all session exams
         $sessionMarksMap = []; // [student_id][subject_id][exam_id] => mark row
-        if (!empty($sessionExams)) {
-            $examIds = array_column($sessionExams, 'id');
+        if (!empty($cleanSessionExams)) {
+            $examIds = array_column($cleanSessionExams, 'id');
             $inExams = implode(',', array_fill(0, count($examIds), '?'));
             $allMarksStmt = $pdo->prepare("SELECT em.exam_id, em.student_id, em.subject_id, em.min_marks, em.max_marks, em.obtained_marks, em.attendance
                                            FROM exam_marks em
@@ -659,7 +705,7 @@ class ExamMarkController
             }
         }
 
-        // Map session exams to standard report card term slots
+        // Map session exams to standard report card term slots (for backwards compatibility)
         $slotMap = [
             'unit_1'      => null,
             'unit_2'      => null,
@@ -668,39 +714,18 @@ class ExamMarkController
             'final'       => null,
         ];
 
-        foreach ($sessionExams as $se) {
+        foreach ($cleanSessionExams as $se) {
             $eName = strtolower($se['name'] . ' ' . ($se['type_name'] ?? '') . ' ' . ($se['type_short_name'] ?? ''));
-            if ($slotMap['unit_1'] === null && (str_contains($eName, 'i unit') || str_contains($eName, '1st unit') || str_contains($eName, 'unit 1') || str_contains($eName, 'unit-1') || str_contains($eName, 'unit i') || str_contains($eName, 'ut 1') || str_contains($eName, 'ut1'))) {
+            if ($slotMap['unit_1'] === null && (str_contains($eName, 'i unit') || str_contains($eName, '1st unit') || str_contains($eName, 'unit 1') || str_contains($eName, 'unit-1') || str_contains($eName, 'unit i') || str_contains($eName, 'ut 1') || str_contains($eName, 'ut1') || str_contains($eName, 'term 1') || str_contains($eName, 'term-1') || str_contains($eName, 'term 1st'))) {
                 $slotMap['unit_1'] = $se;
-            } elseif ($slotMap['unit_2'] === null && (str_contains($eName, 'ii unit') || str_contains($eName, '2nd unit') || str_contains($eName, 'unit 2') || str_contains($eName, 'unit-2') || str_contains($eName, 'unit ii') || str_contains($eName, 'ut 2') || str_contains($eName, 'ut2'))) {
+            } elseif ($slotMap['unit_2'] === null && (str_contains($eName, 'ii unit') || str_contains($eName, '2nd unit') || str_contains($eName, 'unit 2') || str_contains($eName, 'unit-2') || str_contains($eName, 'unit ii') || str_contains($eName, 'ut 2') || str_contains($eName, 'ut2') || str_contains($eName, 'term 2') || str_contains($eName, 'term-2'))) {
                 $slotMap['unit_2'] = $se;
-            } elseif ($slotMap['half_yearly'] === null && (str_contains($eName, 'half') || str_contains($eName, 'mid') || str_contains($eName, 'term 1') || str_contains($eName, 'hy'))) {
+            } elseif ($slotMap['half_yearly'] === null && (str_contains($eName, 'half') || str_contains($eName, 'mid') || str_contains($eName, 'hy'))) {
                 $slotMap['half_yearly'] = $se;
-            } elseif ($slotMap['unit_3'] === null && (str_contains($eName, 'iii unit') || str_contains($eName, '3rd unit') || str_contains($eName, 'unit 3') || str_contains($eName, 'unit-3') || str_contains($eName, 'unit iii') || str_contains($eName, 'ut 3') || str_contains($eName, 'ut3'))) {
+            } elseif ($slotMap['unit_3'] === null && (str_contains($eName, 'iii unit') || str_contains($eName, '3rd unit') || str_contains($eName, 'unit 3') || str_contains($eName, 'unit-3') || str_contains($eName, 'unit iii') || str_contains($eName, 'ut 3') || str_contains($eName, 'ut3') || str_contains($eName, 'term 3') || str_contains($eName, 'term-3'))) {
                 $slotMap['unit_3'] = $se;
-            } elseif ($slotMap['final'] === null && (str_contains($eName, 'final') || str_contains($eName, 'annual') || str_contains($eName, 'yearly') || str_contains($eName, 'term 2'))) {
+            } elseif ($slotMap['final'] === null && (str_contains($eName, 'final') || str_contains($eName, 'annual') || str_contains($eName, 'yearly') || str_contains($eName, 'term 4'))) {
                 $slotMap['final'] = $se;
-            }
-        }
-
-        // Ensure current exam is slotted if not already matched
-        $curExamMatched = false;
-        foreach ($slotMap as $slotKey => $slotVal) {
-            if ($slotVal && (int) $slotVal['id'] === $examId) {
-                $curExamMatched = true;
-                break;
-            }
-        }
-        if (!$curExamMatched) {
-            if ($slotMap['half_yearly'] === null) {
-                $slotMap['half_yearly'] = $exam;
-            } else {
-                foreach ($slotMap as $sk => $sv) {
-                    if ($sv === null) {
-                        $slotMap[$sk] = $exam;
-                        break;
-                    }
-                }
             }
         }
 
@@ -713,6 +738,18 @@ class ExamMarkController
             $primarySubjects = [];
             $extraSubjects = [];
 
+            $examTotals = [];
+            foreach ($cleanSessionExams as $se) {
+                $examTotals[$se['id']] = [
+                    'exam_id'    => $se['id'],
+                    'exam_name'  => $se['name'],
+                    'max'        => 0.0,
+                    'obtained'   => 0.0,
+                    'percentage' => 0.0,
+                ];
+            }
+            $grandTotal = ['max' => 0.0, 'obtained' => 0.0, 'percentage' => 0.0];
+
             $termTotals = [
                 'unit_1'      => ['max' => 0.0, 'obtained' => 0.0, 'percentage' => 0.0],
                 'unit_2'      => ['max' => 0.0, 'obtained' => 0.0, 'percentage' => 0.0],
@@ -724,94 +761,96 @@ class ExamMarkController
 
             foreach ($st['subjects'] as $subRes) {
                 $subId = (int) $subRes['subject_id'];
-                $slotsData = [];
+                $examMarks = [];
                 $subGrandMax = 0.0;
                 $subGrandObt = 0.0;
-                $hasTermScore = false;
 
-                foreach ($slotMap as $slotKey => $slotExam) {
-                    if ($slotExam) {
-                        $seId = (int) $slotExam['id'];
-                        $mRow = $sessionMarksMap[$sid][$subId][$seId] ?? null;
-                        if ($mRow) {
-                            $hasTermScore = true;
-                            $obt = (float) $mRow['obtained_marks'];
-                            $max = (float) $mRow['max_marks'];
-                            $att = $mRow['attendance'];
-                            $slotsData[$slotKey] = [
-                                'max'        => $max,
-                                'obtained'   => $obt,
-                                'attendance' => $att,
-                            ];
-                            $subGrandMax += $max;
+                foreach ($cleanSessionExams as $se) {
+                    $seId = (int) $se['id'];
+                    $mRow = $sessionMarksMap[$sid][$subId][$seId] ?? null;
+
+                    if ($mRow) {
+                        $obt = (float) $mRow['obtained_marks'];
+                        $max = (float) $mRow['max_marks'];
+                        $att = (string) $mRow['attendance'];
+                        $examMarks[$seId] = [
+                            'exam_id'    => $seId,
+                            'exam_name'  => $se['name'],
+                            'max'        => $max,
+                            'obtained'   => $obt,
+                            'attendance' => $att,
+                        ];
+                        $subGrandMax += $max;
+                        if ($att !== 'absent') {
+                            $subGrandObt += $obt;
+                        }
+                        if ($subRes['type'] === 'primary') {
+                            $examTotals[$seId]['max'] += $max;
                             if ($att !== 'absent') {
-                                $subGrandObt += $obt;
+                                $examTotals[$seId]['obtained'] += $obt;
                             }
-                            if ($subRes['type'] === 'primary') {
-                                $termTotals[$slotKey]['max'] += $max;
-                                if ($att !== 'absent') {
-                                    $termTotals[$slotKey]['obtained'] += $obt;
-                                }
-                            }
-                        } elseif ($seId === $examId) {
-                            $hasTermScore = true;
-                            $obt = (float) $subRes['obtained_marks'];
-                            $max = (float) $subRes['max_marks'];
-                            $att = $subRes['attendance'];
-                            $slotsData[$slotKey] = [
-                                'max'        => $max,
-                                'obtained'   => $obt,
-                                'attendance' => $att,
-                            ];
-                            $subGrandMax += $max;
+                        }
+                    } elseif ($seId === $examId) {
+                        $obt = (float) $subRes['obtained_marks'];
+                        $max = (float) $subRes['max_marks'];
+                        $att = (string) $subRes['attendance'];
+                        $examMarks[$seId] = [
+                            'exam_id'    => $seId,
+                            'exam_name'  => $se['name'],
+                            'max'        => $max,
+                            'obtained'   => $obt,
+                            'attendance' => $att,
+                        ];
+                        $subGrandMax += $max;
+                        if ($att !== 'absent') {
+                            $subGrandObt += $obt;
+                        }
+                        if ($subRes['type'] === 'primary') {
+                            $examTotals[$seId]['max'] += $max;
                             if ($att !== 'absent') {
-                                $subGrandObt += $obt;
+                                $examTotals[$seId]['obtained'] += $obt;
                             }
-                            if ($subRes['type'] === 'primary') {
-                                $termTotals[$slotKey]['max'] += $max;
-                                if ($att !== 'absent') {
-                                    $termTotals[$slotKey]['obtained'] += $obt;
-                                }
-                            }
-                        } else {
-                            $slotsData[$slotKey] = null;
                         }
                     } else {
-                        $slotsData[$slotKey] = null;
+                        $examMarks[$seId] = [
+                            'exam_id'    => $seId,
+                            'exam_name'  => $se['name'],
+                            'max'        => 0.0,
+                            'obtained'   => 0.0,
+                            'attendance' => 'not_entered',
+                        ];
                     }
                 }
 
-                if (!$hasTermScore) {
-                    $obt = (float) $subRes['obtained_marks'];
-                    $max = (float) $subRes['max_marks'];
-                    $att = $subRes['attendance'];
-                    $slotsData['half_yearly'] = [
-                        'max'        => $max,
-                        'obtained'   => $obt,
-                        'attendance' => $att,
-                    ];
-                    $subGrandMax = $max;
-                    if ($att !== 'absent') {
-                        $subGrandObt = $obt;
-                    }
-                    if ($subRes['type'] === 'primary') {
-                        $termTotals['half_yearly']['max'] += $max;
-                        if ($att !== 'absent') {
-                            $termTotals['half_yearly']['obtained'] += $obt;
-                        }
-                    }
+                if ($subGrandMax === 0.0 && (float) $subRes['max_marks'] > 0) {
+                    $subGrandMax = (float) $subRes['max_marks'];
+                    $subGrandObt = (float) $subRes['obtained_marks'];
                 }
 
-                $slotsData['grand_total'] = [
+                if ($subRes['type'] === 'primary') {
+                    $grandTotal['max'] += $subGrandMax;
+                    $grandTotal['obtained'] += $subGrandObt;
+                }
+
+                $subRes['exam_marks'] = $examMarks;
+                $subRes['total'] = [
                     'max'      => $subGrandMax,
                     'obtained' => $subGrandObt,
                 ];
 
-                if ($subRes['type'] === 'primary') {
-                    $termTotals['grand_total']['max'] += $subGrandMax;
-                    $termTotals['grand_total']['obtained'] += $subGrandObt;
+                // Legacy slot mapping
+                $slotsData = [];
+                foreach ($slotMap as $slotKey => $slotExam) {
+                    if ($slotExam && isset($examMarks[(int) $slotExam['id']])) {
+                        $slotsData[$slotKey] = $examMarks[(int) $slotExam['id']];
+                    } else {
+                        $slotsData[$slotKey] = null;
+                    }
                 }
-
+                $slotsData['grand_total'] = [
+                    'max'      => $subGrandMax,
+                    'obtained' => $subGrandObt,
+                ];
                 $subRes['term_marks'] = $slotsData;
 
                 if ($subRes['type'] === 'extra_activity') {
@@ -821,10 +860,13 @@ class ExamMarkController
                 }
             }
 
-            foreach ($termTotals as $k => &$t) {
+            foreach ($examTotals as $k => &$t) {
                 $t['percentage'] = $t['max'] > 0 ? round(($t['obtained'] / $t['max']) * 100, 2) : 0.0;
             }
             unset($t);
+
+            $grandTotal['percentage'] = $grandTotal['max'] > 0 ? round(($grandTotal['obtained'] / $grandTotal['max']) * 100, 2) : 0.0;
+            $termTotals['grand_total'] = $grandTotal;
 
             $marksheets[] = array_merge($st, [
                 'father_name'      => $prof['father_name'] ?? 'N/A',
@@ -834,12 +876,14 @@ class ExamMarkController
                 'admission_no'     => $prof['admission_no'] ?? '',
                 'primary_subjects' => $primarySubjects,
                 'extra_subjects'   => $extraSubjects,
+                'exam_totals'      => $examTotals,
+                'grand_total'      => $grandTotal,
                 'term_totals'      => $termTotals,
             ]);
         }
 
         return Response::success([
-            'school'     => [
+            'school'        => [
                 'name'            => $exam['firm_name'] ?: 'MADHUVAN PUBLIC SR. SEC. SCHOOL',
                 'address'         => $exam['firm_address'] ?: 'SECTOR-2, MADHUVAN, BASNI, JODHPUR (RAJ.)',
                 'email'           => $exam['firm_email'] ?: 'info@school.edu',
@@ -847,11 +891,12 @@ class ExamMarkController
                 'logo'            => $exam['firm_logo'] ?: null,
                 'registration_no' => $exam['firm_registration_no'] ?: '4664 Dt. 21-9-2001',
             ],
-            'exam'       => $exam,
-            'section'    => $section,
-            'subjects'   => $subjectsList,
-            'marksheets' => $marksheets,
-            'term_slots' => $slotMap,
+            'exam'          => $exam,
+            'section'       => $section,
+            'subjects'      => $subjectsList,
+            'marksheets'    => $marksheets,
+            'session_exams' => $cleanSessionExams,
+            'term_slots'    => $slotMap,
         ]);
     }
 }

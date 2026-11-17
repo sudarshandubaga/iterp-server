@@ -45,3 +45,4 @@ class AddSortOrderToExamsTable extends Migration
         }
     }
 }
+

@@ -68,7 +68,7 @@ class ExamController
                 LEFT JOIN academic_years ay ON ay.id = e.academic_year_id
                 LEFT JOIN firms f ON f.id = e.firm_id
                 WHERE {$whereSql}
-                ORDER BY e.start_date DESC, e.id DESC";
+                ORDER BY e.sort_order ASC, e.start_date ASC, e.id ASC";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
@@ -128,6 +128,7 @@ class ExamController
             'status'            => 'nullable|string',
             'description'       => 'nullable|string',
             'firm_id'           => 'nullable|integer',
+            'sort_order'        => 'nullable|integer',
         ]);
 
         if ($validator->fails()) {
@@ -139,8 +140,12 @@ class ExamController
         try {
             $pdo->beginTransaction();
 
-            $stmt = $pdo->prepare("INSERT INTO exams (academic_year_id, exam_type_id, name, start_date, end_date, status, description, firm_id, created_at, updated_at)
-                                   VALUES (:academic_year_id, :exam_type_id, :name, :start_date, :end_date, :status, :description, :firm_id, NOW(), NOW())");
+            $sortOrder = isset($data['sort_order']) && $data['sort_order'] !== ''
+                ? (int) $data['sort_order']
+                : (int) $pdo->query("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM exams WHERE deleted_at IS NULL")->fetchColumn();
+
+            $stmt = $pdo->prepare("INSERT INTO exams (academic_year_id, exam_type_id, name, start_date, end_date, status, description, firm_id, sort_order, created_at, updated_at)
+                                   VALUES (:academic_year_id, :exam_type_id, :name, :start_date, :end_date, :status, :description, :firm_id, :sort_order, NOW(), NOW())");
             $stmt->execute([
                 'academic_year_id' => (int) $data['academic_year_id'],
                 'exam_type_id'     => (int) $data['exam_type_id'],
@@ -150,6 +155,7 @@ class ExamController
                 'status'           => !empty($data['status']) ? (string) $data['status'] : 'upcoming',
                 'description'      => !empty($data['description']) ? (string) $data['description'] : null,
                 'firm_id'          => !empty($data['firm_id']) ? (int) $data['firm_id'] : null,
+                'sort_order'       => $sortOrder,
             ]);
 
             $examId = (int) $pdo->lastInsertId();
@@ -186,6 +192,7 @@ class ExamController
             'status'            => 'nullable|string',
             'description'       => 'nullable|string',
             'firm_id'           => 'nullable|integer',
+            'sort_order'        => 'nullable|integer',
         ]);
 
         if ($validator->fails()) {
@@ -197,6 +204,8 @@ class ExamController
         try {
             $pdo->beginTransaction();
 
+            $sortOrder = isset($data['sort_order']) && $data['sort_order'] !== '' ? (int) $data['sort_order'] : null;
+
             $stmt = $pdo->prepare("UPDATE exams SET academic_year_id = :academic_year_id,
                                                    exam_type_id = :exam_type_id,
                                                    name = :name,
@@ -205,6 +214,7 @@ class ExamController
                                                    status = :status,
                                                    description = :description,
                                                    firm_id = :firm_id,
+                                                   sort_order = COALESCE(:sort_order, sort_order),
                                                    updated_at = NOW()
                                    WHERE id = :id AND deleted_at IS NULL");
             $stmt->execute([
@@ -217,6 +227,7 @@ class ExamController
                 'status'           => !empty($data['status']) ? (string) $data['status'] : 'upcoming',
                 'description'      => !empty($data['description']) ? (string) $data['description'] : null,
                 'firm_id'          => !empty($data['firm_id']) ? (int) $data['firm_id'] : null,
+                'sort_order'       => $sortOrder,
             ]);
 
             // If section_ids provided in payload, update allocations
@@ -246,6 +257,70 @@ class ExamController
         $stmt->execute(['id' => $id]);
 
         return Response::success(['message' => 'Exam deleted successfully.']);
+    }
+
+    /**
+     * Batch update sort_order for drag-and-drop exam reordering.
+     * Accepts:
+     *   { "order": [id1, id2, ...] } or { "ids": [id1, id2, ...] }
+     *   or
+     *   { "items": [ { "id": 1, "sort_order": 1 }, ... ] }
+     */
+    public function reorder(Request $request): Response
+    {
+        $data = $request->all();
+        $pdo = Database::pdo();
+
+        $orderIds = $data['order'] ?? $data['ids'] ?? null;
+        $items = $data['items'] ?? null;
+
+        try {
+            $pdo->beginTransaction();
+            $stmt = $pdo->prepare("UPDATE exams SET sort_order = :sort_order, updated_at = NOW() WHERE id = :id");
+
+            // Mode 1: simple array of ordered IDs: [5, 2, 8, 1]
+            if (is_array($orderIds) && !empty($orderIds)) {
+                $pos = 1;
+                foreach ($orderIds as $id) {
+                    $stmt->execute([
+                        'sort_order' => $pos++,
+                        'id'         => (int) $id,
+                    ]);
+                }
+                if ($pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+                return Response::success(['updated' => count($orderIds)], 200);
+            }
+
+            // Mode 2: array of items: [{ id: 5, sort_order: 1 }, ...]
+            if (is_array($items) && !empty($items)) {
+                $count = 0;
+                foreach ($items as $item) {
+                    if (isset($item['id'], $item['sort_order'])) {
+                        $stmt->execute([
+                            'sort_order' => (int) $item['sort_order'],
+                            'id'         => (int) $item['id'],
+                        ]);
+                        $count++;
+                    }
+                }
+                if ($pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+                return Response::success(['updated' => $count], 200);
+            }
+
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Response::error('Invalid reorder payload. Provide `order` array of IDs or `items` array.', 422);
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Response::error('Failed to update exam sort order: ' . $e->getMessage(), 500);
+        }
     }
 
     /**
