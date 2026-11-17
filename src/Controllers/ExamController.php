@@ -301,6 +301,7 @@ class ExamController
         }
 
         $classRoster = [];
+        $allocatedClassesOnly = [];
         foreach ($classes as $c) {
             $cid = (int) $c['id'];
             $c['sections'] = $sectionsByClass[$cid] ?? [];
@@ -308,14 +309,63 @@ class ExamController
             $c['total_sections'] = count($c['sections']);
             $c['allocated_sections'] = count(array_filter($c['sections'], fn($s) => $s['is_allocated']));
             $classRoster[] = $c;
+
+            if ($c['is_allocated'] && $c['allocated_sections'] > 0) {
+                $cCopy = $c;
+                $cCopy['sections'] = array_values(array_filter($c['sections'], fn($s) => $s['is_allocated']));
+                $allocatedClassesOnly[] = $cCopy;
+            }
         }
 
         return Response::success([
             'exam'                  => $exam,
             'allocated_section_ids' => $allocatedSectionIds,
             'allocated_class_ids'   => array_values($allocatedClassIds),
+            'allocated_classes'     => $allocatedClassesOnly,
             'classes'               => $classRoster,
         ]);
+    }
+
+    /**
+     * Get only the allocated classes and their allocated sections for an exam.
+     */
+    public function getAllocatedClasses(Request $request, array $context, array $params): Response
+    {
+        $id = (int) $params['id'];
+        $pdo = Database::pdo();
+
+        $sql = "SELECT DISTINCT ac.id AS class_id, ac.name AS class_name, ac.short_name AS class_short_name, ac.sort_order,
+                                sec.id AS section_id, sec.name AS section_name
+                FROM exam_class_allocations eca
+                INNER JOIN academic_classes ac ON ac.id = eca.academic_class_id AND ac.deleted_at IS NULL
+                INNER JOIN sections sec ON sec.id = eca.section_id AND sec.deleted_at IS NULL
+                WHERE eca.exam_id = :exam_id
+                ORDER BY ac.sort_order ASC, ac.name ASC, sec.name ASC";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(['exam_id' => $id]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        $grouped = [];
+        foreach ($rows as $row) {
+            $cid = (int) $row['class_id'];
+            if (!isset($grouped[$cid])) {
+                $grouped[$cid] = [
+                    'id'         => $cid,
+                    'name'       => $row['class_name'],
+                    'short_name' => $row['class_short_name'],
+                    'sort_order' => (int) $row['sort_order'],
+                    'sections'   => [],
+                ];
+            }
+            $grouped[$cid]['sections'][] = [
+                'id'       => (int) $row['section_id'],
+                'name'     => $row['section_name'],
+                'class_id' => $cid,
+            ];
+        }
+
+        return Response::success(array_values($grouped));
     }
 
     /**

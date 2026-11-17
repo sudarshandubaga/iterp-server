@@ -109,6 +109,7 @@ $resources = [
 
 // Examination Module custom routes
 $router->get('/api/exams/{id}/allocations',                [$locale . 'ExamController', 'getAllocations'], $authOnly);
+$router->get('/api/exams/{id}/allocated-classes',          [$locale . 'ExamController', 'getAllocatedClasses'], $authOnly);
 $router->post('/api/exams/{id}/allocations',               [$locale . 'ExamController', 'saveAllocations'], $authOnly);
 $router->post('/api/exam-schedules/batch-save',             [$locale . 'ExamScheduleController', 'batchSave'], $authOnly);
 $router->get('/api/exam-marks/entry-sheet',                [$locale . 'ExamMarkController', 'entrySheet'], $authOnly);

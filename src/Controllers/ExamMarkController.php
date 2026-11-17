@@ -82,6 +82,17 @@ class ExamMarkController
             return Response::error('Section not found.', 404);
         }
 
+        // Verify allocation if exam has allocations configured
+        $hasAllocStmt = $pdo->prepare("SELECT 1 FROM exam_class_allocations WHERE exam_id = :exam_id LIMIT 1");
+        $hasAllocStmt->execute(['exam_id' => $examId]);
+        if ($hasAllocStmt->fetch()) {
+            $isAllocatedStmt = $pdo->prepare("SELECT 1 FROM exam_class_allocations WHERE exam_id = :exam_id AND section_id = :section_id LIMIT 1");
+            $isAllocatedStmt->execute(['exam_id' => $examId, 'section_id' => $sectionId]);
+            if (!$isAllocatedStmt->fetch()) {
+                return Response::error('This section has not been allocated to the selected exam. Please allocate it in Exam Class Allocation first.', 422);
+            }
+        }
+
         // 3. Fetch Subject
         $subStmt = $pdo->prepare("SELECT id, name, short_name, code, type FROM exam_subjects WHERE id = :id AND deleted_at IS NULL LIMIT 1");
         $subStmt->execute(['id' => $subjectId]);
@@ -214,6 +225,17 @@ class ExamMarkController
         $secStmt->execute(['id' => $sectionId]);
         $sec = $secStmt->fetch(\PDO::FETCH_ASSOC);
         $classId = $sec ? (int) $sec['class_id'] : null;
+
+        // Verify allocation if exam has allocations configured
+        $hasAllocStmt = $pdo->prepare("SELECT 1 FROM exam_class_allocations WHERE exam_id = :exam_id LIMIT 1");
+        $hasAllocStmt->execute(['exam_id' => $examId]);
+        if ($hasAllocStmt->fetch()) {
+            $isAllocatedStmt = $pdo->prepare("SELECT 1 FROM exam_class_allocations WHERE exam_id = :exam_id AND section_id = :section_id LIMIT 1");
+            $isAllocatedStmt->execute(['exam_id' => $examId, 'section_id' => $sectionId]);
+            if (!$isAllocatedStmt->fetch()) {
+                return Response::error('Cannot save marks: this section is not allocated to the selected exam.', 422);
+            }
+        }
 
         try {
             $pdo->beginTransaction();
