@@ -249,6 +249,81 @@ abstract class CrudController
         return Response::success(null, 'Record deleted.');
     }
 
+    /**
+     * Batch update sort_order (drag-and-drop sorting).
+     * Accepts:
+     *   { "order": [id1, id2, id3, ...] }
+     *   or
+     *   { "items": [ { "id": id1, "sort_order": 1 }, ... ] }
+     */
+    public function reorder(Request $request): Response
+    {
+        $data = $request->all();
+        $table = $this->instance()->table();
+        $columns = $this->tableColumns();
+
+        if (!in_array('sort_order', $columns, true)) {
+            return Response::error('This resource does not support sort_order.', 400);
+        }
+
+        $pdo = Database::pdo();
+        $hasUpdatedAt = in_array('updated_at', $columns, true);
+        $updateSql = $hasUpdatedAt
+            ? "UPDATE `{$table}` SET `sort_order` = :sort_order, `updated_at` = NOW() WHERE `id` = :id"
+            : "UPDATE `{$table}` SET `sort_order` = :sort_order WHERE `id` = :id";
+
+        $orderIds = $data['order'] ?? $data['ids'] ?? null;
+        $items = $data['items'] ?? null;
+
+        try {
+            $pdo->beginTransaction();
+            $stmt = $pdo->prepare($updateSql);
+
+            // Mode 1: simple array of ordered IDs: [5, 2, 8, 1]
+            if (is_array($orderIds) && !empty($orderIds)) {
+                $pos = 1;
+                foreach ($orderIds as $id) {
+                    $stmt->execute([
+                        'sort_order' => $pos++,
+                        'id'         => (int) $id,
+                    ]);
+                }
+                if ($pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+                return Response::success(['updated' => count($orderIds)], 'Order updated successfully.');
+            }
+
+            // Mode 2: array of items: [{ id: 5, sort_order: 1 }, ...]
+            if (is_array($items) && !empty($items)) {
+                $count = 0;
+                foreach ($items as $item) {
+                    if (isset($item['id'], $item['sort_order'])) {
+                        $stmt->execute([
+                            'sort_order' => (int) $item['sort_order'],
+                            'id'         => (int) $item['id'],
+                        ]);
+                        $count++;
+                    }
+                }
+                if ($pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+                return Response::success(['updated' => $count], 'Order updated successfully.');
+            }
+
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Response::error('Invalid reorder payload. Provide "order": [id1, id2, ...] or "items": [{id, sort_order}].', 422);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Response::error('Failed to update sort order: ' . $e->getMessage(), 500);
+        }
+    }
+
     /** Overridable: normalize request data before it is validated/persisted. */
     protected function payload(array $data): array
     {

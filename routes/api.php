@@ -146,8 +146,9 @@ $router->post('/api/students/import',                     [$locale . 'StudentImp
 foreach ($resources as $path => $controllerName) {
     $controller = $locale . $controllerName;
 
-    $router->get('/api/' . $path,              [$controller, 'index'],  $authOnly);
-    $router->post('/api/' . $path,              [$controller, 'store'],  $authOnly);
+    $router->post('/api/' . $path . '/reorder',    [$controller, 'reorder'], $authOnly);
+    $router->get('/api/' . $path,                  [$controller, 'index'],  $authOnly);
+    $router->post('/api/' . $path,                 [$controller, 'store'],  $authOnly);
     $router->get('/api/' . $path . '/{id}',      [$controller, 'show'],   $authOnly);
     $router->put('/api/' . $path . '/{id}',      [$controller, 'update'], $authOnly);
     $router->patch('/api/' . $path . '/{id}',    [$controller, 'update'], $authOnly);
