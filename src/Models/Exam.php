@@ -20,6 +20,7 @@ class Exam extends Model
         'academic_year_id',
         'exam_type_id',
         'name',
+        'sort_order',
         'start_date',
         'end_date',
         'status',
