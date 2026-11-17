@@ -266,13 +266,32 @@ class ExamController
      *   or
      *   { "items": [ { "id": 1, "sort_order": 1 }, ... ] }
      */
-    public function reorder(Request $request): Response
+    public function reorder(Request $request, array $context = [], array $params = []): Response
     {
         $data = $request->all();
         $pdo = Database::pdo();
 
+        // Ensure sort_order column exists in exams table
+        try {
+            $cols = $pdo->query("SHOW COLUMNS FROM exams LIKE 'sort_order'")->fetchAll();
+            if (empty($cols)) {
+                $pdo->exec("ALTER TABLE exams ADD COLUMN sort_order INT UNSIGNED NOT NULL DEFAULT 0 AFTER exam_type_id, ADD INDEX idx_exams_sort_order (sort_order)");
+            }
+        } catch (\Throwable $t) {
+            // ignore if already exists or restricted
+        }
+
         $orderIds = $data['order'] ?? $data['ids'] ?? null;
         $items = $data['items'] ?? null;
+
+        // In case request JSON body was a raw indexed array:
+        if ($orderIds === null && $items === null && is_array($data) && !empty($data)) {
+            if (isset($data[0]) && is_array($data[0]) && isset($data[0]['id'])) {
+                $items = $data;
+            } elseif (isset($data[0]) && is_numeric($data[0])) {
+                $orderIds = $data;
+            }
+        }
 
         try {
             $pdo->beginTransaction();
@@ -283,14 +302,14 @@ class ExamController
                 $pos = 1;
                 foreach ($orderIds as $id) {
                     $stmt->execute([
-                        'sort_order' => $pos++,
+                        'sort_order' => $pos++ * 10,
                         'id'         => (int) $id,
                     ]);
                 }
                 if ($pdo->inTransaction()) {
                     $pdo->commit();
                 }
-                return Response::success(['updated' => count($orderIds)], 200);
+                return Response::success(['updated' => count($orderIds)], 'Exam order updated successfully.');
             }
 
             // Mode 2: array of items: [{ id: 5, sort_order: 1 }, ...]
@@ -308,14 +327,14 @@ class ExamController
                 if ($pdo->inTransaction()) {
                     $pdo->commit();
                 }
-                return Response::success(['updated' => $count], 200);
+                return Response::success(['updated' => $count], 'Exam order updated successfully.');
             }
 
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             return Response::error('Invalid reorder payload. Provide `order` array of IDs or `items` array.', 422);
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
