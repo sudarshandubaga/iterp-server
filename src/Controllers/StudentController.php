@@ -596,8 +596,12 @@ class StudentController
             return null;
         }
 
-        // If it's already a relative /uploads/ path or absolute URL, retain it
-        if (str_starts_with($photo, '/uploads/') || str_starts_with($photo, 'http://') || str_starts_with($photo, 'https://')) {
+        // If it's already an upload on our server (relative or full URL), retain the clean relative path in DB
+        if (preg_match('~(/uploads/[^\s?#]+)~i', $photo, $m)) {
+            return $m[1];
+        }
+
+        if (str_starts_with($photo, 'http://') || str_starts_with($photo, 'https://')) {
             return $photo;
         }
 

@@ -16,7 +16,7 @@ class Response
     public function __construct(int $status = 200, mixed $body = null, array $headers = [])
     {
         $this->status  = $status;
-        $this->body    = $body;
+        $this->body    = function_exists('transform_asset_urls') ? transform_asset_urls($body) : $body;
         $this->headers = array_merge([
             'Content-Type' => 'application/json; charset=utf-8',
         ], $headers);
@@ -78,7 +78,8 @@ class Response
         }
 
         if ($this->body !== null) {
-            $json = json_encode($this->body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+            $body = function_exists('transform_asset_urls') ? transform_asset_urls($this->body) : $this->body;
+            $json = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
             echo $json ?: json_encode(['error' => 'JSON encoding failed']);
         }
         return $this;

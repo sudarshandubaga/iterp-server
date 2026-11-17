@@ -45,7 +45,12 @@ class FirmController extends CrudController
      */
     private function processFirmLogo(string $logo): string
     {
-        if (str_starts_with($logo, '/uploads/') || str_starts_with($logo, 'http://') || str_starts_with($logo, 'https://')) {
+        // If it's already an upload on our server (relative or full URL), retain the clean relative path in DB
+        if (preg_match('~(/uploads/[^\s?#]+)~i', $logo, $m)) {
+            return $m[1];
+        }
+
+        if (str_starts_with($logo, 'http://') || str_starts_with($logo, 'https://')) {
             return $logo;
         }
 
