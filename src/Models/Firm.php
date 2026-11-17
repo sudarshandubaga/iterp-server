@@ -26,4 +26,13 @@ class Firm extends Model
         'fax',
         'logo',
     ];
+
+    public function getLogoAttritube($logo)
+    {
+        if (!empty($logo)) {
+            return asset("storage" . $logo);
+        }
+
+        return null;
+    }
 }
