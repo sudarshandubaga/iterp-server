@@ -116,6 +116,10 @@ $router->post('/api/exam-marks/batch-save',                [$locale . 'ExamMarkC
 $router->get('/api/exam-marks/result-sheet',               [$locale . 'ExamMarkController', 'resultSheet'], $authOnly);
 $router->get('/api/exam-marks/marksheet-data',             [$locale . 'ExamMarkController', 'marksheetData'], $authOnly);
 
+// ID Card Module custom routes
+$router->get('/api/id-cards/students',                     [$locale . 'IdCardController', 'students'], $authOnly);
+$router->get('/api/id-cards/teachers',                     [$locale . 'IdCardController', 'teachers'], $authOnly);
+
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
 $router->get('/api/fee-collections/student-dues',         [$locale . 'FeeCollectionController', 'studentDues'], $authOnly);
