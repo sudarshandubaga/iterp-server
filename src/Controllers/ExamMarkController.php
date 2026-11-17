@@ -556,7 +556,7 @@ class ExamMarkController
 
         // 1. Exam & Firm
         $examStmt = $pdo->prepare("SELECT e.*, ay.name AS academic_year_name, et.name AS exam_type_name,
-                                          f.name AS firm_name, f.email AS firm_email, f.mobile_no AS firm_phone,
+                                          f.name AS firm_name, f.email AS firm_email, f.phone_no AS firm_phone,
                                           f.address AS firm_address, f.logo AS firm_logo
                                    FROM exams e
                                    LEFT JOIN academic_years ay ON ay.id = e.academic_year_id
