@@ -134,6 +134,43 @@ $router->get('/api/report-format-settings',                [$locale . 'ReportFor
 $router->post('/api/report-format-settings',               [$locale . 'ReportFormatSettingController', 'save'], $authOnly);
 $router->put('/api/report-format-settings',                [$locale . 'ReportFormatSettingController', 'save'], $authOnly);
 
+// Payroll Module routes
+$payroll = $locale . 'PayrollController';
+$router->get('/api/payroll/employees',                     [$payroll, 'employeesList'], $authOnly);
+// 1. Salary Slabs
+$router->post('/api/payroll/salary-slabs/reorder',         [$payroll, 'salarySlabsReorder'], $authOnly);
+$router->get('/api/payroll/salary-slabs',                  [$payroll, 'salarySlabsIndex'], $authOnly);
+$router->post('/api/payroll/salary-slabs',                 [$payroll, 'salarySlabsStore'], $authOnly);
+$router->put('/api/payroll/salary-slabs/{id}',             [$payroll, 'salarySlabsUpdate'], $authOnly);
+$router->delete('/api/payroll/salary-slabs/{id}',          [$payroll, 'salarySlabsDestroy'], $authOnly);
+// 2. Allowance & Deductions
+$router->post('/api/payroll/components/reorder',           [$payroll, 'componentsReorder'], $authOnly);
+$router->get('/api/payroll/components',                    [$payroll, 'componentsIndex'], $authOnly);
+$router->post('/api/payroll/components',                   [$payroll, 'componentsStore'], $authOnly);
+$router->put('/api/payroll/components/{id}',               [$payroll, 'componentsUpdate'], $authOnly);
+$router->delete('/api/payroll/components/{id}',            [$payroll, 'componentsDestroy'], $authOnly);
+// 3. Payroll Settings (PF / ESI / TDS)
+$router->get('/api/payroll/settings',                      [$payroll, 'settingsIndex'], $authOnly);
+$router->post('/api/payroll/settings',                     [$payroll, 'settingsSave'], $authOnly);
+// 4. Part Payment
+$router->get('/api/payroll/part-payments',                 [$payroll, 'partPaymentsIndex'], $authOnly);
+$router->post('/api/payroll/part-payments',                [$payroll, 'partPaymentsStore'], $authOnly);
+$router->put('/api/payroll/part-payments/{id}',            [$payroll, 'partPaymentsUpdate'], $authOnly);
+$router->delete('/api/payroll/part-payments/{id}',         [$payroll, 'partPaymentsDestroy'], $authOnly);
+// 5. Loans (with Pay by Cash & View Transactions)
+$router->get('/api/payroll/loans',                         [$payroll, 'loansIndex'], $authOnly);
+$router->post('/api/payroll/loans',                        [$payroll, 'loansStore'], $authOnly);
+$router->put('/api/payroll/loans/{id}',                    [$payroll, 'loansUpdate'], $authOnly);
+$router->delete('/api/payroll/loans/{id}',                 [$payroll, 'loansDestroy'], $authOnly);
+$router->post('/api/payroll/loans/{id}/pay-cash',          [$payroll, 'loansPayCash'], $authOnly);
+$router->get('/api/payroll/loans/{id}/transactions',       [$payroll, 'loansTransactions'], $authOnly);
+// 6. Pay Slips
+$router->get('/api/payroll/employees-for-payslip',         [$payroll, 'employeesForPayslip'], $authOnly);
+$router->post('/api/payroll/payslips/generate',            [$payroll, 'generatePayslips'], $authOnly);
+$router->get('/api/payroll/payslips',                      [$payroll, 'payslipsIndex'], $authOnly);
+$router->get('/api/payroll/payslips/{id}',                 [$payroll, 'payslipShow'], $authOnly);
+$router->delete('/api/payroll/payslips/{id}',              [$payroll, 'payslipDestroy'], $authOnly);
+
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
 $router->get('/api/fee-collections/student-dues',         [$locale . 'FeeCollectionController', 'studentDues'], $authOnly);
