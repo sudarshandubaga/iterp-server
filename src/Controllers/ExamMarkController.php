@@ -547,12 +547,45 @@ class ExamMarkController
         $examId = (int) $request->query('exam_id');
         $sectionId = (int) $request->query('section_id');
         $studentId = $request->query('student_id') ? (int) $request->query('student_id') : null;
+        $requestedExamIdsParam = $request->query('exam_ids');
 
-        if (!$examId || !$sectionId) {
-            return Response::error('exam_id and section_id are required.', 422);
+        if (!$sectionId) {
+            return Response::error('section_id is required.', 422);
         }
 
         $pdo = Database::pdo();
+
+        // If exam_id not given, derive from exam_ids or section allocations
+        if (!$examId && !empty($requestedExamIdsParam)) {
+            $parsedExamIds = array_filter(array_map('intval', is_array($requestedExamIdsParam) ? $requestedExamIdsParam : explode(',', (string) $requestedExamIdsParam)));
+            if (!empty($parsedExamIds)) {
+                $examId = reset($parsedExamIds);
+            }
+        }
+
+        if (!$examId) {
+            $findExamStmt = $pdo->prepare("SELECT e.id
+                                           FROM exams e
+                                           JOIN exam_class_allocations eca ON eca.exam_id = e.id
+                                           WHERE eca.section_id = :sec_id AND e.deleted_at IS NULL
+                                           ORDER BY e.sort_order ASC, e.start_date ASC, e.id ASC
+                                           LIMIT 1");
+            $findExamStmt->execute(['sec_id' => $sectionId]);
+            $foundExamId = $findExamStmt->fetchColumn();
+            if ($foundExamId) {
+                $examId = (int) $foundExamId;
+            } else {
+                $anyExamStmt = $pdo->query("SELECT id FROM exams WHERE deleted_at IS NULL ORDER BY sort_order ASC, start_date ASC, id ASC LIMIT 1");
+                $anyId = $anyExamStmt->fetchColumn();
+                if ($anyId) {
+                    $examId = (int) $anyId;
+                }
+            }
+        }
+
+        if (!$examId) {
+            return Response::error('No examination found for this section. Please create an exam and allocate it to this class & section.', 422);
+        }
 
         // 1. Exam & Firm
         $examStmt = $pdo->prepare("SELECT e.*, ay.name AS academic_year_name, et.name AS exam_type_name,
@@ -638,8 +671,10 @@ class ExamMarkController
                                       FROM exams e
                                       LEFT JOIN exam_types et ON et.id = e.exam_type_id
                                       WHERE e.academic_year_id = :ay_id AND e.deleted_at IS NULL
+                                        AND (EXISTS (SELECT 1 FROM exam_class_allocations eca WHERE eca.exam_id = e.id AND eca.section_id = :sec_id)
+                                             OR NOT EXISTS (SELECT 1 FROM exam_class_allocations eca2 WHERE eca2.exam_id = e.id))
                                       ORDER BY e.sort_order ASC, e.start_date ASC, e.id ASC");
-        $ayExamsStmt->execute(['ay_id' => $ayId]);
+        $ayExamsStmt->execute(['ay_id' => $ayId, 'sec_id' => $sectionId]);
         $sessionExams = $ayExamsStmt->fetchAll(\PDO::FETCH_ASSOC);
 
         // Ensure current exam is included in sessionExams if not found

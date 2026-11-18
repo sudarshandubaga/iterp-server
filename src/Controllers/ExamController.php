@@ -48,6 +48,18 @@ class ExamController
             $params['status'] = (string) $status;
         }
 
+        $sectionId = $request->query('section_id');
+        if ($sectionId !== null && $sectionId !== '') {
+            $where[] = '(EXISTS (SELECT 1 FROM exam_class_allocations eca WHERE eca.exam_id = e.id AND eca.section_id = :sec_id) OR NOT EXISTS (SELECT 1 FROM exam_class_allocations eca2 WHERE eca2.exam_id = e.id))';
+            $params['sec_id'] = (int) $sectionId;
+        }
+
+        $classId = $request->query('class_id');
+        if ($classId !== null && $classId !== '' && ($sectionId === null || $sectionId === '')) {
+            $where[] = '(EXISTS (SELECT 1 FROM exam_class_allocations eca WHERE eca.exam_id = e.id AND eca.academic_class_id = :cls_id) OR NOT EXISTS (SELECT 1 FROM exam_class_allocations eca2 WHERE eca2.exam_id = e.id))';
+            $params['cls_id'] = (int) $classId;
+        }
+
         $search = $request->query('search');
         if ($search !== null && trim((string) $search) !== '') {
             $where[] = '(e.name LIKE :search OR et.name LIKE :search OR et.short_name LIKE :search)';
