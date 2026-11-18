@@ -129,6 +129,11 @@ $router->get('/api/employee-attendance/sheet',             [$locale . 'Attendanc
 $router->post('/api/employee-attendance/batch-save',       [$locale . 'AttendanceController', 'employeeBatchSave'], $authOnly);
 $router->get('/api/employee-attendance/report',            [$locale . 'AttendanceController', 'employeeReport'], $authOnly);
 
+// Report Format Settings routes
+$router->get('/api/report-format-settings',                [$locale . 'ReportFormatSettingController', 'index'], $authOnly);
+$router->post('/api/report-format-settings',               [$locale . 'ReportFormatSettingController', 'save'], $authOnly);
+$router->put('/api/report-format-settings',                [$locale . 'ReportFormatSettingController', 'save'], $authOnly);
+
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
 $router->get('/api/fee-collections/student-dues',         [$locale . 'FeeCollectionController', 'studentDues'], $authOnly);
