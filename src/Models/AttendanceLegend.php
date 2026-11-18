@@ -27,5 +27,6 @@ class AttendanceLegend extends Model
         'treat_as',
         'total_leaves',
         'legend_for',
+        'sort_order',
     ];
 }

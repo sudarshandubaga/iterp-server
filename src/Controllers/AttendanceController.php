@@ -84,12 +84,14 @@ class AttendanceController
      */
     protected function fetchLegends(\PDO $pdo, string $for): array
     {
+        AttendanceLegendController::ensureSortOrderColumn($pdo);
+
         $stmt = $pdo->prepare(
-            "SELECT id, name, short_name, treat_as, total_leaves, legend_for
+            "SELECT id, name, short_name, treat_as, total_leaves, legend_for, sort_order
              FROM attendance_legends
              WHERE deleted_at IS NULL
                AND legend_for IN (:for_type, 'both')
-             ORDER BY FIELD(treat_as, 'present', 'absent'), id ASC"
+             ORDER BY sort_order ASC, FIELD(treat_as, 'present', 'absent'), id ASC"
         );
         $stmt->execute(['for_type' => $for]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
@@ -102,6 +104,7 @@ class AttendanceController
                 'treat_as'     => (string) $r['treat_as'],
                 'total_leaves' => (int) ($r['total_leaves'] ?? 0),
                 'legend_for'   => (string) ($r['legend_for'] ?? 'both'),
+                'sort_order'   => (int) ($r['sort_order'] ?? 0),
             ];
         }, $rows);
     }
