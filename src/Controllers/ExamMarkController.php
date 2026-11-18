@@ -667,7 +667,7 @@ class ExamMarkController
 
         // 3. Multi-term exams for this Academic Year and Section (Ordered manually by sort_order)
         $ayId = (int) $exam['academic_year_id'];
-        $ayExamsStmt = $pdo->prepare("SELECT e.id, e.name, e.start_date, e.sort_order, et.name AS type_name, et.short_name AS type_short_name
+        $ayExamsStmt = $pdo->prepare("SELECT e.id, e.name, e.start_date, e.end_date, e.sort_order, et.name AS type_name, et.short_name AS type_short_name
                                       FROM exams e
                                       LEFT JOIN exam_types et ON et.id = e.exam_type_id
                                       WHERE e.academic_year_id = :ay_id AND e.deleted_at IS NULL
@@ -690,6 +690,7 @@ class ExamMarkController
                 'id'              => (int) $exam['id'],
                 'name'            => $exam['name'],
                 'start_date'      => $exam['start_date'] ?? '',
+                'end_date'        => $exam['end_date'] ?? '',
                 'sort_order'      => (int) ($exam['sort_order'] ?? 0),
                 'type_name'       => $exam['exam_type_name'] ?? '',
                 'type_short_name' => '',
@@ -717,10 +718,80 @@ class ExamMarkController
                 'id'              => (int) $se['id'],
                 'name'            => $se['name'],
                 'start_date'      => $se['start_date'] ?? '',
+                'end_date'        => $se['end_date'] ?? '',
                 'sort_order'      => (int) ($se['sort_order'] ?? 0),
                 'type_name'       => $se['type_name'] ?? '',
                 'type_short_name' => $se['type_short_name'] ?? '',
             ];
+        }
+
+        // Fetch student attendance summaries (overall session + per-exam period windows)
+        $attendanceMap = [];
+        if (!empty($studentIds)) {
+            try {
+                AttendanceController::ensureTables($pdo);
+                $inStu = implode(',', array_fill(0, count($studentIds), '?'));
+                $attSql = "SELECT sa.student_id, sa.attendance_date, al.treat_as
+                           FROM student_attendances sa
+                           INNER JOIN attendance_legends al ON al.id = sa.attendance_legend_id
+                           WHERE sa.student_id IN ({$inStu})
+                             AND sa.deleted_at IS NULL
+                             AND (sa.academic_year_id = ? OR sa.academic_year_id IS NULL)
+                           ORDER BY sa.attendance_date ASC";
+                $attStmt = $pdo->prepare($attSql);
+                $attStmt->execute(array_merge($studentIds, [$ayId]));
+                $attRows = $attStmt->fetchAll(\PDO::FETCH_ASSOC);
+
+                // Sort session exams chronologically by end_date/start_date for period bucketing
+                $datedExams = array_values(array_filter($cleanSessionExams, static fn($e) => !empty($e['end_date']) || !empty($e['start_date'])));
+                usort($datedExams, static function ($a, $b) {
+                    $da = (string) ($a['end_date'] ?: $a['start_date']);
+                    $db = (string) ($b['end_date'] ?: $b['start_date']);
+                    return strcmp($da, $db);
+                });
+
+                foreach ($attRows as $ar) {
+                    $sid = (int) $ar['student_id'];
+                    $d = (string) $ar['attendance_date'];
+                    $isPresent = ($ar['treat_as'] ?? '') === 'present';
+
+                    if (!isset($attendanceMap[$sid])) {
+                        $attendanceMap[$sid] = [
+                            'present' => 0,
+                            'absent'  => 0,
+                            'total'   => 0,
+                            'by_exam' => [],
+                        ];
+                    }
+                    $attendanceMap[$sid]['total']++;
+                    if ($isPresent) {
+                        $attendanceMap[$sid]['present']++;
+                    } else {
+                        $attendanceMap[$sid]['absent']++;
+                    }
+
+                    // Assign this day to the matching exam period window
+                    if (!empty($datedExams)) {
+                        $targetExamId = (int) end($datedExams)['id'];
+                        foreach ($datedExams as $de) {
+                            $cutoff = (string) ($de['end_date'] ?: $de['start_date']);
+                            if ($d <= $cutoff) {
+                                $targetExamId = (int) $de['id'];
+                                break;
+                            }
+                        }
+                        if (!isset($attendanceMap[$sid]['by_exam'][$targetExamId])) {
+                            $attendanceMap[$sid]['by_exam'][$targetExamId] = ['present' => 0, 'total' => 0];
+                        }
+                        $attendanceMap[$sid]['by_exam'][$targetExamId]['total']++;
+                        if ($isPresent) {
+                            $attendanceMap[$sid]['by_exam'][$targetExamId]['present']++;
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                // Attendance table might not be populated yet; ignore safely.
+            }
         }
 
         // Fetch marks for this section across all session exams
@@ -903,6 +974,24 @@ class ExamMarkController
             $grandTotal['percentage'] = $grandTotal['max'] > 0 ? round(($grandTotal['obtained'] / $grandTotal['max']) * 100, 2) : 0.0;
             $termTotals['grand_total'] = $grandTotal;
 
+            $stuAttRaw = $attendanceMap[$sid] ?? ['present' => 0, 'absent' => 0, 'total' => 0, 'by_exam' => []];
+            $attTotal = (int) $stuAttRaw['total'];
+            $attPresent = (int) $stuAttRaw['present'];
+            $attAbsent = (int) $stuAttRaw['absent'];
+            $attPct = $attTotal > 0 ? round(($attPresent / $attTotal) * 100, 2) : 0.0;
+            $byExamFormatted = [];
+            foreach ($stuAttRaw['by_exam'] as $exKey => $exAtt) {
+                $exT = (int) $exAtt['total'];
+                $exP = (int) $exAtt['present'];
+                $exPct = $exT > 0 ? round(($exP / $exT) * 100, 2) : 0.0;
+                $byExamFormatted[(int) $exKey] = [
+                    'present_days' => $exP,
+                    'total_days'   => $exT,
+                    'percentage'   => $exPct,
+                    'formatted'    => $exT > 0 ? sprintf('%d / %d (%.2f%%)', $exP, $exT, $exPct) : '',
+                ];
+            }
+
             $marksheets[] = array_merge($st, [
                 'father_name'      => $prof['father_name'] ?? 'N/A',
                 'mother_name'      => $prof['mother_name'] ?? 'N/A',
@@ -914,6 +1003,14 @@ class ExamMarkController
                 'exam_totals'      => $examTotals,
                 'grand_total'      => $grandTotal,
                 'term_totals'      => $termTotals,
+                'attendance'       => [
+                    'present_days' => $attPresent,
+                    'absent_days'  => $attAbsent,
+                    'total_days'   => $attTotal,
+                    'percentage'   => $attPct,
+                    'formatted'    => $attTotal > 0 ? sprintf('%d / %d (%.2f%%)', $attPresent, $attTotal, $attPct) : '',
+                    'by_exam'      => $byExamFormatted,
+                ],
             ]);
         }
 

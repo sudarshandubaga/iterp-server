@@ -121,6 +121,14 @@ $router->get('/api/exam-marks/marksheet-data',             [$locale . 'ExamMarkC
 $router->get('/api/id-cards/students',                     [$locale . 'IdCardController', 'students'], $authOnly);
 $router->get('/api/id-cards/teachers',                     [$locale . 'IdCardController', 'teachers'], $authOnly);
 
+// Attendance Module routes (Student & Employee)
+$router->get('/api/student-attendance/sheet',              [$locale . 'AttendanceController', 'studentSheet'], $authOnly);
+$router->post('/api/student-attendance/batch-save',        [$locale . 'AttendanceController', 'studentBatchSave'], $authOnly);
+$router->get('/api/student-attendance/report',             [$locale . 'AttendanceController', 'studentReport'], $authOnly);
+$router->get('/api/employee-attendance/sheet',             [$locale . 'AttendanceController', 'employeeSheet'], $authOnly);
+$router->post('/api/employee-attendance/batch-save',       [$locale . 'AttendanceController', 'employeeBatchSave'], $authOnly);
+$router->get('/api/employee-attendance/report',            [$locale . 'AttendanceController', 'employeeReport'], $authOnly);
+
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
 $router->get('/api/fee-collections/student-dues',         [$locale . 'FeeCollectionController', 'studentDues'], $authOnly);
