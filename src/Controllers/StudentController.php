@@ -624,4 +624,323 @@ class StudentController
 
         return $photo;
     }
+
+    /**
+     * GET /api/students/fast-edit-data
+     * Returns all students in a section (including all custom_field_values as cf_{id})
+     * plus the list of student custom fields for the Fast Edit bulk-update workflow.
+     */
+    public function fastEditData(Request $request): Response
+    {
+        $sectionId = (int) $request->query('section_id');
+        if (!$sectionId) {
+            return Response::error('section_id is required.', 422);
+        }
+
+        $pdo = Database::pdo();
+
+        // 1. Section & Class details
+        $secStmt = $pdo->prepare(
+            'SELECT sec.id, sec.name AS section_name, sec.class_id, ac.name AS class_name
+             FROM sections sec
+             LEFT JOIN academic_classes ac ON ac.id = sec.class_id
+             WHERE sec.id = :id AND sec.deleted_at IS NULL
+             LIMIT 1'
+        );
+        $secStmt->execute(['id' => $sectionId]);
+        $section = $secStmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$section) {
+            return Response::error('Section not found.', 404);
+        }
+
+        // 2. Fetch all students in this section
+        $bindings = ['section_id' => $sectionId];
+        $extraWhere = '';
+        $firmId = $request->query('firm_id');
+        if ($firmId !== null && $firmId !== '') {
+            $bindings['firm_id'] = (int) $firmId;
+            $extraWhere .= ' AND (u.firm_id = :firm_id OR u.firm_id IS NULL)';
+        }
+
+        $sql = "SELECT u.id, u.first_name, u.middle_name, u.last_name, u.username,
+                       u.title_id, u.gender, u.dob, u.doj, u.email, u.mobile_no,
+                       u.city_id, u.academic_year_id, u.firm_id, u.is_active,
+                       s.id AS student_id, s.enrollment_number, s.scholar_number, s.roll_number,
+                       s.father_email, s.father_mobile_no, s.photo, s.section_id,
+                       s.student_category_id, s.fee_bill_scheme_id, s.fee_concession_id,
+                       sec.name AS section_name, sec.class_id, ac.name AS class_name
+                FROM students s
+                INNER JOIN users u ON u.id = s.user_id AND u.deleted_at IS NULL
+                LEFT JOIN sections sec ON sec.id = s.section_id
+                LEFT JOIN academic_classes ac ON ac.id = sec.class_id
+                WHERE s.section_id = :section_id
+                  AND s.deleted_at IS NULL
+                  {$extraWhere}
+                ORDER BY CAST(s.roll_number AS UNSIGNED) ASC, s.roll_number ASC, u.first_name ASC";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($bindings);
+        $students = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        // 3. Batch-load all custom_field_values for these users
+        $userIds = array_map(static fn($r) => (int) $r['id'], $students);
+        $cfByUser = [];
+        if (!empty($userIds)) {
+            $inClause = implode(',', array_fill(0, count($userIds), '?'));
+            $cfStmt = $pdo->prepare(
+                "SELECT cfv.user_id, cfv.custom_field_id, cfv.value
+                 FROM custom_field_values cfv
+                 INNER JOIN custom_fields cf ON cf.id = cfv.custom_field_id AND cf.deleted_at IS NULL
+                 WHERE cfv.user_id IN ({$inClause})"
+            );
+            $cfStmt->execute($userIds);
+            foreach ($cfStmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $uid = (int) $row['user_id'];
+                $cfByUser[$uid]['cf_' . $row['custom_field_id']] = $row['value'];
+            }
+        }
+
+        foreach ($students as &$stu) {
+            $uid = (int) $stu['id'];
+            $stu['id'] = $uid;
+            $stu['student_id'] = (int) $stu['student_id'];
+            if (isset($cfByUser[$uid])) {
+                foreach ($cfByUser[$uid] as $k => $v) {
+                    $stu[$k] = $v;
+                }
+            }
+        }
+        unset($stu);
+
+        // 4. Fetch active student custom fields
+        $cfListStmt = $pdo->query(
+            "SELECT cf.id, cf.custom_field_category_id, cf.name, cf.field_type, cf.data_type,
+                    cf.options, cf.mandatory, cf.default_value, cf.max_length, cf.sort_order,
+                    cfc.name AS category_name
+             FROM custom_fields cf
+             INNER JOIN custom_field_categories cfc ON cfc.id = cf.custom_field_category_id
+             WHERE cfc.type = 'student'
+               AND cfc.deleted_at IS NULL
+               AND cf.deleted_at IS NULL
+               AND cf.`show` = 'yes'
+             ORDER BY cfc.sort_order ASC, cfc.id ASC, cf.sort_order ASC, cf.id ASC"
+        );
+        $customFields = array_map(static function (array $r): array {
+            return [
+                'id'                       => (int) $r['id'],
+                'custom_field_category_id' => (int) $r['custom_field_category_id'],
+                'category_name'            => (string) $r['category_name'],
+                'name'                     => (string) $r['name'],
+                'field_type'               => (string) $r['field_type'],
+                'data_type'                => (string) $r['data_type'],
+                'options'                  => $r['options'],
+                'mandatory'                => (string) $r['mandatory'],
+                'default_value'            => $r['default_value'],
+                'max_length'               => $r['max_length'] !== null ? (int) $r['max_length'] : null,
+            ];
+        }, $cfListStmt ? $cfListStmt->fetchAll(\PDO::FETCH_ASSOC) : []);
+
+        return Response::success([
+            'section'       => [
+                'id'           => (int) $section['id'],
+                'section_name' => (string) $section['section_name'],
+                'class_id'     => (int) $section['class_id'],
+                'class_name'   => (string) ($section['class_name'] ?? ''),
+            ],
+            'students'      => $students,
+            'custom_fields' => $customFields,
+        ]);
+    }
+
+    /**
+     * POST /api/students/bulk-update
+     * Bulk-updates ONLY the selected fields for the selected students inside a transaction.
+     * Payload: { fields: string[], rows: [{ id: user_id, values: { field: value, ... } }] }
+     */
+    public function bulkUpdate(Request $request): Response
+    {
+        $data = $request->all();
+        $fields = $data['fields'] ?? [];
+        $rows = $data['rows'] ?? [];
+
+        if (!is_array($fields) || empty($fields)) {
+            return Response::error('Please select at least one field to update.', 422);
+        }
+        if (!is_array($rows) || empty($rows)) {
+            return Response::error('Please select at least one student to update.', 422);
+        }
+
+        $allowedUserCols = [
+            'first_name'       => 'string',
+            'middle_name'      => 'nullable_string',
+            'last_name'        => 'nullable_string',
+            'username'         => 'string',
+            'title_id'         => 'nullable_int',
+            'gender'           => 'nullable_string',
+            'dob'              => 'nullable_date',
+            'doj'              => 'nullable_date',
+            'email'            => 'nullable_string',
+            'mobile_no'        => 'nullable_string',
+            'city_id'          => 'nullable_int',
+            'academic_year_id' => 'nullable_int',
+            'is_active'        => 'active_flag',
+            'password'         => 'password',
+        ];
+
+        $allowedStudentCols = [
+            'enrollment_number'   => 'nullable_string',
+            'scholar_number'      => 'nullable_string',
+            'roll_number'         => 'nullable_string',
+            'father_email'        => 'nullable_string',
+            'father_mobile_no'    => 'nullable_string',
+            'section_id'          => 'nullable_int',
+            'student_category_id' => 'nullable_int',
+            'fee_bill_scheme_id'  => 'nullable_int',
+            'fee_concession_id'   => 'nullable_int',
+        ];
+
+        $selectedUserCols = [];
+        $selectedStudentCols = [];
+        $selectedCustomIds = [];
+
+        foreach ($fields as $f) {
+            $key = (string) $f;
+            if (isset($allowedUserCols[$key])) {
+                $selectedUserCols[$key] = $allowedUserCols[$key];
+            } elseif (isset($allowedStudentCols[$key])) {
+                $selectedStudentCols[$key] = $allowedStudentCols[$key];
+            } elseif (str_starts_with($key, 'cf_') && ctype_digit(substr($key, 3))) {
+                $selectedCustomIds[$key] = (int) substr($key, 3);
+            }
+        }
+
+        if (empty($selectedUserCols) && empty($selectedStudentCols) && empty($selectedCustomIds)) {
+            return Response::error('No valid editable fields were selected.', 422);
+        }
+
+        $pdo = Database::pdo();
+        $updatedCount = 0;
+
+        try {
+            $pdo->beginTransaction();
+
+            foreach ($rows as $row) {
+                $userId = isset($row['id']) ? (int) $row['id'] : 0;
+                $values = is_array($row['values'] ?? null) ? $row['values'] : [];
+                if ($userId <= 0) {
+                    continue;
+                }
+
+                // 1. Update `users` columns if any selected
+                if (!empty($selectedUserCols)) {
+                    $setParts = [];
+                    $params = ['id' => $userId];
+                    foreach ($selectedUserCols as $col => $kind) {
+                        if (!array_key_exists($col, $values)) {
+                            continue;
+                        }
+                        $raw = $values[$col];
+                        if ($kind === 'password') {
+                            $pw = trim((string) ($raw ?? ''));
+                            if ($pw === '') {
+                                continue; // Blank password leaves existing password unchanged
+                            }
+                            if (strlen($pw) < 8) {
+                                throw new \RuntimeException("Password for student #{$userId} must be at least 8 characters.");
+                            }
+                            $setParts[] = '`password` = :password';
+                            $params['password'] = password_hash($pw, PASSWORD_BCRYPT);
+                            continue;
+                        }
+                        if ($kind === 'string') {
+                            $val = trim((string) ($raw ?? ''));
+                            if ($val === '' && $col === 'first_name') {
+                                throw new \RuntimeException("First Name cannot be empty (student #{$userId}).");
+                            }
+                            if ($val === '' && $col === 'username') {
+                                throw new \RuntimeException("Username cannot be empty (student #{$userId}).");
+                            }
+                            $setParts[] = "`{$col}` = :{$col}";
+                            $params[$col] = $val;
+                        } elseif ($kind === 'nullable_int') {
+                            $val = ($raw === '' || $raw === null) ? null : (int) $raw;
+                            $setParts[] = "`{$col}` = :{$col}";
+                            $params[$col] = $val;
+                        } elseif ($kind === 'nullable_date') {
+                            $val = trim((string) ($raw ?? ''));
+                            $setParts[] = "`{$col}` = :{$col}";
+                            $params[$col] = $val === '' ? null : $val;
+                        } elseif ($kind === 'active_flag') {
+                            $val = in_array((string) $raw, ['y', 'n'], true) ? (string) $raw : 'y';
+                            $setParts[] = "`{$col}` = :{$col}";
+                            $params[$col] = $val;
+                        } else {
+                            $val = trim((string) ($raw ?? ''));
+                            $setParts[] = "`{$col}` = :{$col}";
+                            $params[$col] = $val === '' ? null : $val;
+                        }
+                    }
+                    if (!empty($setParts)) {
+                        $setParts[] = 'updated_at = NOW()';
+                        $sql = 'UPDATE users SET ' . implode(', ', $setParts) . ' WHERE id = :id AND deleted_at IS NULL';
+                        $pdo->prepare($sql)->execute($params);
+                    }
+                }
+
+                // 2. Update `students` columns if any selected
+                if (!empty($selectedStudentCols)) {
+                    $setParts = [];
+                    $params = ['uid' => $userId];
+                    foreach ($selectedStudentCols as $col => $kind) {
+                        if (!array_key_exists($col, $values)) {
+                            continue;
+                        }
+                        $raw = $values[$col];
+                        if ($kind === 'nullable_int') {
+                            $val = ($raw === '' || $raw === null) ? null : (int) $raw;
+                        } else {
+                            $trimmed = trim((string) ($raw ?? ''));
+                            $val = $trimmed === '' ? null : $trimmed;
+                        }
+                        // Enrollment & scholar numbers are NOT NULL in schema; skip clearing them to null
+                        if (($col === 'enrollment_number' || $col === 'scholar_number') && $val === null) {
+                            continue;
+                        }
+                        $setParts[] = "`{$col}` = :{$col}";
+                        $params[$col] = $val;
+                    }
+                    if (!empty($setParts)) {
+                        $setParts[] = 'updated_at = NOW()';
+                        $sql = 'UPDATE students SET ' . implode(', ', $setParts) . ' WHERE user_id = :uid AND deleted_at IS NULL';
+                        $pdo->prepare($sql)->execute($params);
+                    }
+                }
+
+                // 3. Update `custom_field_values` if any selected
+                foreach ($selectedCustomIds as $cfKey => $cfId) {
+                    if (!array_key_exists($cfKey, $values)) {
+                        continue;
+                    }
+                    $raw = $values[$cfKey];
+                    $strVal = is_array($raw)
+                        ? implode(', ', $raw)
+                        : ($raw !== null && trim((string) $raw) !== '' ? trim((string) $raw) : null);
+                    CustomFieldValue::setValue($userId, $cfId, $strVal);
+                }
+
+                $updatedCount++;
+            }
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Response::error('Bulk update failed: ' . $e->getMessage(), 422);
+        }
+
+        return Response::success([
+            'updated' => $updatedCount,
+        ], "Successfully updated {$updatedCount} student(s).");
+    }
 }

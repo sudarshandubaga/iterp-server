@@ -152,9 +152,11 @@ $router->get('/api/admission/reports/collection',         [$locale . 'AdmissionR
 $router->get('/api/admission/reports/analysis',           [$locale . 'AdmissionReportController', 'analysisReport'], $authOnly);
 $router->get('/api/admission/reports/strength',           [$locale . 'AdmissionReportController', 'strengthReport'], $authOnly);
 
-// Student Import routes
+// Student Import & Fast Edit routes
 $router->get('/api/students/import-template',              [$locale . 'StudentImportController', 'downloadTemplate'], $authOnly);
 $router->post('/api/students/import',                     [$locale . 'StudentImportController', 'import'], $authOnly);
+$router->get('/api/students/fast-edit-data',              [$locale . 'StudentController', 'fastEditData'], $authOnly);
+$router->post('/api/students/bulk-update',                [$locale . 'StudentController', 'bulkUpdate'], $authOnly);
 
 foreach ($resources as $path => $controllerName) {
     $controller = $locale . $controllerName;
