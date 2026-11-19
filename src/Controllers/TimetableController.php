@@ -187,12 +187,13 @@ class TimetableController
         return Response::success($timetables);
     }
 
-    public function show(Request $request, array $routeParams): Response
+    public function show(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $id = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $id = (int) ($routeParams['id'] ?? $request->input('id') ?? 0);
         $stmt = $pdo->prepare(
             'SELECT t.*, ay.name AS session_name, f.name AS firm_name
              FROM timetables t
@@ -265,12 +266,13 @@ class TimetableController
         return Response::success(['id' => $id], 'Timetable created successfully.', 201);
     }
 
-    public function update(Request $request, array $routeParams): Response
+    public function update(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $id = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $id = (int) ($routeParams['id'] ?? $request->input('id') ?? 0);
         $body = $request->all();
 
         $validator = new Validator($body, [
@@ -307,12 +309,13 @@ class TimetableController
         return Response::success(['id' => $id], 'Timetable updated successfully.');
     }
 
-    public function destroy(Request $request, array $routeParams): Response
+    public function destroy(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $id = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $id = (int) ($routeParams['id'] ?? $request->input('id') ?? 0);
         $stmt = $pdo->prepare(
             'UPDATE timetables SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id'
         );
@@ -325,12 +328,13 @@ class TimetableController
     // 2. TIMETABLE LECTURES CRUD
     // =========================================================================
 
-    public function lecturesList(Request $request, array $routeParams): Response
+    public function lecturesList(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $timetableId = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $timetableId = (int) ($routeParams['id'] ?? $request->input('timetable_id') ?? $request->query('timetable_id') ?? 0);
         $stmt = $pdo->prepare(
             'SELECT * FROM timetable_lectures 
              WHERE timetable_id = :id AND deleted_at IS NULL 
@@ -342,12 +346,17 @@ class TimetableController
         return Response::success($lectures);
     }
 
-    public function lectureStore(Request $request, array $routeParams): Response
+    public function lectureStore(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $timetableId = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $timetableId = (int) ($routeParams['id'] ?? $request->input('timetable_id') ?? 0);
+        if ($timetableId <= 0) {
+            return Response::error('Valid Timetable ID is required.', 422);
+        }
+
         $body = $request->all();
 
         $validator = new Validator($body, [
@@ -392,12 +401,17 @@ class TimetableController
         return Response::success(['id' => $id], 'Lecture added successfully.', 201);
     }
 
-    public function lectureUpdate(Request $request, array $routeParams): Response
+    public function lectureUpdate(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $lectureId = (int) ($routeParams['lectureId'] ?? $routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $lectureId = (int) ($routeParams['lectureId'] ?? $routeParams['id'] ?? $request->input('lecture_id') ?? 0);
+        if ($lectureId <= 0) {
+            return Response::error('Valid Lecture ID is required.', 422);
+        }
+
         $body = $request->all();
 
         $validator = new Validator($body, [
@@ -440,12 +454,13 @@ class TimetableController
         return Response::success(null, 'Lecture updated successfully.');
     }
 
-    public function lectureDestroy(Request $request, array $routeParams): Response
+    public function lectureDestroy(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $lectureId = (int) ($routeParams['lectureId'] ?? $routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $lectureId = (int) ($routeParams['lectureId'] ?? $routeParams['id'] ?? $request->input('lecture_id') ?? 0);
         $stmt = $pdo->prepare(
             'UPDATE timetable_lectures SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id'
         );
@@ -454,7 +469,7 @@ class TimetableController
         return Response::success(null, 'Lecture deleted successfully.');
     }
 
-    public function lecturesReorder(Request $request, array $routeParams): Response
+    public function lecturesReorder(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
@@ -480,12 +495,13 @@ class TimetableController
     // 3. CLASS / SECTION ALLOCATION
     // =========================================================================
 
-    public function allocationsList(Request $request, array $routeParams): Response
+    public function allocationsList(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $timetableId = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $timetableId = (int) ($routeParams['id'] ?? $request->input('timetable_id') ?? $request->query('timetable_id') ?? 0);
         $stmt = $pdo->prepare(
             'SELECT a.*, c.name AS class_name, s.name AS section_name
              FROM timetable_class_allocations a
@@ -500,12 +516,17 @@ class TimetableController
         return Response::success($allocations);
     }
 
-    public function allocationSave(Request $request, array $routeParams): Response
+    public function allocationSave(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $timetableId = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $timetableId = (int) ($routeParams['id'] ?? $request->input('timetable_id') ?? 0);
+        if ($timetableId <= 0) {
+            return Response::error('Valid Timetable ID is required.', 422);
+        }
+
         $body = $request->all();
 
         // Expects: { allocations: [ { academic_class_id: 1, section_id: 2 }, ... ] }
@@ -542,12 +563,13 @@ class TimetableController
         return Response::success(['added_count' => $addedCount], "Successfully allocated {$addedCount} class/section(s).");
     }
 
-    public function allocationRemove(Request $request, array $routeParams): Response
+    public function allocationRemove(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $allocationId = (int) ($routeParams['allocationId'] ?? $routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $allocationId = (int) ($routeParams['allocationId'] ?? $routeParams['id'] ?? $request->input('allocation_id') ?? 0);
         $stmt = $pdo->prepare(
             'UPDATE timetable_class_allocations SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id'
         );
@@ -1136,12 +1158,13 @@ class TimetableController
         ], "Substituted with {$subName} successfully.", 201);
     }
 
-    public function substitutionCancel(Request $request, array $routeParams): Response
+    public function substitutionCancel(Request $request, array $context = [], array $params = []): Response
     {
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $id = (int) ($routeParams['id'] ?? 0);
+        $routeParams = !empty($params) ? $params : $context;
+        $id = (int) ($routeParams['id'] ?? $request->input('id') ?? 0);
         $stmt = $pdo->prepare(
             'UPDATE timetable_substitutions 
              SET status = "cancelled", deleted_at = CURRENT_TIMESTAMP 
