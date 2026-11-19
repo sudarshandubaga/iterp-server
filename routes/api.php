@@ -175,6 +175,38 @@ $router->get('/api/payroll/allotment',                     [$payroll, 'allotment
 $router->post('/api/payroll/allotment',                    [$payroll, 'allotmentSave'], $authOnly);
 $router->post('/api/payroll/allotment/save',               [$payroll, 'allotmentSave'], $authOnly);
 
+// Timetabling Module routes
+$tt = $locale . 'TimetableController';
+// 1. Timetable Master CRUD
+$router->get('/api/timetables',                            [$tt, 'index'], $authOnly);
+$router->post('/api/timetables',                           [$tt, 'store'], $authOnly);
+$router->get('/api/timetables/{id}',                       [$tt, 'show'], $authOnly);
+$router->put('/api/timetables/{id}',                       [$tt, 'update'], $authOnly);
+$router->delete('/api/timetables/{id}',                    [$tt, 'destroy'], $authOnly);
+// 2. Timetable Lectures
+$router->get('/api/timetables/{id}/lectures',              [$tt, 'lecturesList'], $authOnly);
+$router->post('/api/timetables/{id}/lectures',             [$tt, 'lectureStore'], $authOnly);
+$router->post('/api/timetables/{id}/lectures/reorder',     [$tt, 'lecturesReorder'], $authOnly);
+$router->put('/api/timetables/{id}/lectures/{lectureId}',  [$tt, 'lectureUpdate'], $authOnly);
+$router->delete('/api/timetables/{id}/lectures/{lectureId}', [$tt, 'lectureDestroy'], $authOnly);
+// 3. Timetable Class/Section Allocations
+$router->get('/api/timetables/{id}/allocations',           [$tt, 'allocationsList'], $authOnly);
+$router->post('/api/timetables/{id}/allocations',          [$tt, 'allocationSave'], $authOnly);
+$router->delete('/api/timetables/{id}/allocations/{allocationId}', [$tt, 'allocationRemove'], $authOnly);
+// 4. Timetable Generator & Grid Matrix
+$router->get('/api/timetabling/grid',                      [$tt, 'gridGet'], $authOnly);
+$router->post('/api/timetabling/grid',                     [$tt, 'gridSave'], $authOnly);
+$router->get('/api/timetabling/check-clashes',             [$tt, 'checkClashes'], $authOnly);
+// 5. Teacher Substitution
+$router->get('/api/timetabling/substitution/teacher-schedule', [$tt, 'teacherSchedule'], $authOnly);
+$router->get('/api/timetabling/substitution/free-teachers',    [$tt, 'freeTeachers'], $authOnly);
+$router->post('/api/timetabling/substitution/save',            [$tt, 'substitutionSave'], $authOnly);
+$router->delete('/api/timetabling/substitution/{id}',          [$tt, 'substitutionCancel'], $authOnly);
+// 6. Timetable Reports
+$router->get('/api/timetabling/reports/teacher-wise',      [$tt, 'reportTeacherWise'], $authOnly);
+$router->get('/api/timetabling/reports/group-wise',        [$tt, 'reportGroupWise'], $authOnly);
+$router->get('/api/timetabling/reports/substitution',      [$tt, 'reportSubstitution'], $authOnly);
+
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);
 $router->get('/api/fee-collections/student-dues',         [$locale . 'FeeCollectionController', 'studentDues'], $authOnly);
