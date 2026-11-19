@@ -22,9 +22,16 @@ class Response
         ], $headers);
     }
 
-    public static function json(int $status, mixed $data = null, array $headers = []): self
+    public static function json(mixed $statusOrData, mixed $dataOrStatus = null, array $headers = []): self
     {
-        return new self($status, $data, $headers);
+        if (is_int($statusOrData)) {
+            $status = $statusOrData;
+            $body   = $dataOrStatus;
+        } else {
+            $status = is_int($dataOrStatus) ? $dataOrStatus : 200;
+            $body   = $statusOrData;
+        }
+        return new self($status, $body, $headers);
     }
 
     public static function success(mixed $data = null, string $message = 'OK', int $status = 200): self
