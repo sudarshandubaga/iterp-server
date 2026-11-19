@@ -170,6 +170,10 @@ $router->post('/api/payroll/payslips/generate',            [$payroll, 'generateP
 $router->get('/api/payroll/payslips',                      [$payroll, 'payslipsIndex'], $authOnly);
 $router->get('/api/payroll/payslips/{id}',                 [$payroll, 'payslipShow'], $authOnly);
 $router->delete('/api/payroll/payslips/{id}',              [$payroll, 'payslipDestroy'], $authOnly);
+// 7. Employee Allotments (PF / ESI / TDS)
+$router->get('/api/payroll/allotment',                     [$payroll, 'allotmentIndex'], $authOnly);
+$router->post('/api/payroll/allotment',                    [$payroll, 'allotmentSave'], $authOnly);
+$router->post('/api/payroll/allotment/save',               [$payroll, 'allotmentSave'], $authOnly);
 
 // Fee collection custom routes (registered before resource loop to avoid {id} capturing)
 $router->get('/api/fee-collections/next-number',          [$locale . 'FeeCollectionController', 'nextNumber'], $authOnly);

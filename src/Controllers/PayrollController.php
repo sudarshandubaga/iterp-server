@@ -104,6 +104,7 @@ class PayrollController
                     ifsc_code    VARCHAR(40)  NULL DEFAULT NULL,
                     pan_no       VARCHAR(40)  NULL DEFAULT NULL,
                     uan_no       VARCHAR(50)  NULL DEFAULT NULL,
+                    esi_no       VARCHAR(50)  NULL DEFAULT NULL,
                     created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uq_pep_employee (employee_id),
@@ -217,6 +218,14 @@ class PayrollController
                     INDEX idx_ps_emp (employee_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
             );
+
+            try {
+                $cols = $pdo->query("SHOW COLUMNS FROM payroll_employee_profiles LIKE 'esi_no'")->fetchAll();
+                if (empty($cols)) {
+                    $pdo->exec("ALTER TABLE payroll_employee_profiles ADD COLUMN esi_no VARCHAR(50) NULL DEFAULT NULL AFTER uan_no");
+                }
+            } catch (Throwable $e) {
+            }
         } catch (Throwable $e) {
             // Best-effort self-healing
         }
@@ -1903,6 +1912,265 @@ class PayrollController
                 'generated_at'               => $r['generated_at'],
             ];
         }, $rows);
+    }
+
+    // =========================================================================
+    // 7. EMPLOYEE ALLOTMENTS (PF / ESI / TDS SEPARATE ALLOTMENT)
+    // =========================================================================
+
+    public function allotmentIndex(Request $request): Response
+    {
+        $pdo = Database::pdo();
+        self::ensureTables($pdo);
+
+        $type = strtolower(trim((string) ($request->query('type') ?: 'pf')));
+        if (!in_array($type, ['pf', 'esi', 'tds'], true)) {
+            $type = 'pf';
+        }
+
+        $firmId = $this->resolveFirmId($request);
+        $empType = $request->query('employee_type') ? trim((string) $request->query('employee_type')) : null;
+        $roleId = $request->query('role_id') ? (int) $request->query('role_id') : null;
+        $status = $request->query('status') ? trim((string) $request->query('status')) : 'all';
+        $search = $request->query('search') ? trim((string) $request->query('search')) : null;
+
+        $targetCol = match ($type) {
+            'esi' => 'apply_esi',
+            'tds' => 'apply_tds',
+            default => 'apply_pf',
+        };
+
+        $bindings = [];
+        $where = "WHERE u.deleted_at IS NULL AND e.deleted_at IS NULL AND u.is_active = 'y'";
+
+        if ($firmId !== null) {
+            $bindings['firm_id'] = $firmId;
+            $where .= ' AND (u.firm_id = :firm_id OR u.firm_id IS NULL)';
+        }
+        if ($empType) {
+            $bindings['emp_type'] = $empType;
+            $where .= ' AND e.employee_type = :emp_type';
+        }
+        if ($roleId) {
+            $bindings['role_id'] = $roleId;
+            $where .= ' AND EXISTS (SELECT 1 FROM user_roles ur2 WHERE ur2.user_id = u.id AND ur2.role_id = :role_id)';
+        }
+        if ($search !== null && $search !== '') {
+            $term = '%' . $search . '%';
+            $bindings['q1'] = $term;
+            $bindings['q2'] = $term;
+            $bindings['q3'] = $term;
+            $bindings['q4'] = $term;
+            $bindings['q5'] = $term;
+            $bindings['q6'] = $term;
+            $where .= ' AND (u.first_name LIKE :q1 OR u.middle_name LIKE :q2 OR u.last_name LIKE :q3 OR e.attendance_code LIKE :q4 OR u.mobile_no LIKE :q5 OR pep.uan_no LIKE :q6 OR pep.pan_no LIKE :q6 OR pep.esi_no LIKE :q6)';
+        }
+
+        if ($status === 'allotted') {
+            $defaultVal = $type === 'pf' ? 'y' : 'n';
+            $where .= " AND COALESCE(pep.{$targetCol}, '{$defaultVal}') = 'y'";
+        } elseif ($status === 'unallotted') {
+            $defaultVal = $type === 'pf' ? 'y' : 'n';
+            $where .= " AND COALESCE(pep.{$targetCol}, '{$defaultVal}') = 'n'";
+        }
+
+        $sql = "SELECT e.id AS employee_id, u.id AS user_id, u.first_name, u.middle_name, u.last_name,
+                       u.email, u.mobile_no, u.firm_id, e.employee_type, e.attendance_code, e.photo,
+                       GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR ', ') AS role_names,
+                       COALESCE(pep.basic_salary, 0.00) AS basic_salary,
+                       COALESCE(pep.apply_pf, 'y') AS apply_pf,
+                       COALESCE(pep.apply_esi, 'n') AS apply_esi,
+                       COALESCE(pep.apply_tds, 'n') AS apply_tds,
+                       pep.uan_no,
+                       pep.esi_no,
+                       pep.pan_no,
+                       pep.bank_name,
+                       pep.account_no,
+                       pep.ifsc_code
+                FROM employees e
+                INNER JOIN users u ON u.id = e.user_id
+                LEFT JOIN user_roles ur ON ur.user_id = u.id
+                LEFT JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL
+                LEFT JOIN payroll_employee_profiles pep ON pep.employee_id = e.id
+                {$where}
+                GROUP BY e.id, u.id, pep.id
+                ORDER BY u.first_name ASC, u.last_name ASC";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($bindings);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        $allottedCount = 0;
+        $unallottedCount = 0;
+        $totalWages = 0.0;
+
+        $employees = [];
+        foreach ($rows as $r) {
+            $isAllotted = match ($type) {
+                'esi' => ($r['apply_esi'] === 'y'),
+                'tds' => ($r['apply_tds'] === 'y'),
+                default => ($r['apply_pf'] === 'y'),
+            };
+
+            if ($isAllotted) {
+                $allottedCount++;
+                $totalWages += (float) $r['basic_salary'];
+            } else {
+                $unallottedCount++;
+            }
+
+            $name = trim(implode(' ', array_filter([$r['first_name'] ?? '', $r['middle_name'] ?? '', $r['last_name'] ?? ''])));
+
+            $employees[] = [
+                'employee_id'     => (int) $r['employee_id'],
+                'user_id'         => (int) $r['user_id'],
+                'employee_name'   => $name,
+                'employee_type'   => (string) ($r['employee_type'] ?? 'Teaching'),
+                'attendance_code' => $r['attendance_code'] ?? '',
+                'role_names'      => $r['role_names'] ?? '',
+                'mobile_no'       => $r['mobile_no'] ?? '',
+                'email'           => $r['email'] ?? '',
+                'firm_id'         => $r['firm_id'] !== null ? (int) $r['firm_id'] : null,
+                'photo'           => $r['photo'] ?: null,
+                'basic_salary'    => (float) $r['basic_salary'],
+                'is_allotted'     => $isAllotted,
+                'apply_pf'        => (string) $r['apply_pf'],
+                'apply_esi'       => (string) $r['apply_esi'],
+                'apply_tds'       => (string) $r['apply_tds'],
+                'uan_no'          => $r['uan_no'] ?? '',
+                'esi_no'          => $r['esi_no'] ?? '',
+                'pan_no'          => $r['pan_no'] ?? '',
+                'bank_name'       => $r['bank_name'] ?? '',
+                'account_no'      => $r['account_no'] ?? '',
+                'ifsc_code'       => $r['ifsc_code'] ?? '',
+            ];
+        }
+
+        $effectiveSettings = $this->fetchEffectiveSettings($pdo, $firmId ?? 0);
+
+        return Response::success([
+            'type'        => $type,
+            'firm_id'     => $firmId,
+            'settings'    => $effectiveSettings,
+            'stats'       => [
+                'total'       => count($employees),
+                'allotted'    => $allottedCount,
+                'unallotted'  => $unallottedCount,
+                'total_wages' => round($totalWages, 2),
+            ],
+            'employees'   => $employees,
+        ]);
+    }
+
+    public function allotmentSave(Request $request, array $context = []): Response
+    {
+        $pdo = Database::pdo();
+        self::ensureTables($pdo);
+
+        $data = $request->all();
+        $type = strtolower(trim((string) ($data['type'] ?? 'pf')));
+        if (!in_array($type, ['pf', 'esi', 'tds'], true)) {
+            return Response::error('Invalid allotment type. Must be pf, esi, or tds.', 422);
+        }
+
+        $targetCol = match ($type) {
+            'esi' => 'apply_esi',
+            'tds' => 'apply_tds',
+            default => 'apply_pf',
+        };
+
+        $firmId = $this->resolveFirmId($request, $data);
+
+        // Check if bulk action format: { type, action: 'assign'|'unassign', employee_ids: [...] }
+        if (isset($data['action']) && isset($data['employee_ids']) && is_array($data['employee_ids'])) {
+            $flag = ($data['action'] === 'assign') ? 'y' : 'n';
+            $ids = array_filter(array_map('intval', $data['employee_ids']));
+            if (empty($ids)) {
+                return Response::error('No employee IDs provided.', 422);
+            }
+
+            try {
+                $pdo->beginTransaction();
+                $upsert = $pdo->prepare(
+                    "INSERT INTO payroll_employee_profiles (employee_id, firm_id, {$targetCol})
+                     VALUES (:eid, :fid, :flag)
+                     ON DUPLICATE KEY UPDATE {$targetCol} = VALUES({$targetCol}), updated_at = NOW()"
+                );
+                foreach ($ids as $eid) {
+                    $upsert->execute([
+                        'eid'  => $eid,
+                        'fid'  => $firmId,
+                        'flag' => $flag,
+                    ]);
+                }
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return Response::error('Failed to update allotment: ' . $e->getMessage(), 500);
+            }
+
+            return Response::success(['updated' => count($ids)], "Updated allotment for " . count($ids) . " employee(s).");
+        }
+
+        // Granular items format: { type, items: [ { employee_id, is_allotted, uan_no, esi_no, pan_no, basic_salary } ] }
+        $items = $data['items'] ?? [];
+        if (!is_array($items) || empty($items)) {
+            return Response::error('items array is required.', 422);
+        }
+
+        try {
+            $pdo->beginTransaction();
+
+            $upsertSql = "INSERT INTO payroll_employee_profiles
+                            (employee_id, firm_id, {$targetCol}, uan_no, esi_no, pan_no, basic_salary)
+                          VALUES
+                            (:eid, :fid, :flag, :uan, :esi, :pan, :basic)
+                          ON DUPLICATE KEY UPDATE
+                            {$targetCol} = VALUES({$targetCol}),
+                            uan_no       = COALESCE(VALUES(uan_no), uan_no),
+                            esi_no       = COALESCE(VALUES(esi_no), esi_no),
+                            pan_no       = COALESCE(VALUES(pan_no), pan_no),
+                            basic_salary = CASE WHEN VALUES(basic_salary) > 0 THEN VALUES(basic_salary) ELSE basic_salary END,
+                            updated_at   = NOW()";
+
+            $stmt = $pdo->prepare($upsertSql);
+            $updated = 0;
+
+            foreach ($items as $item) {
+                $eid = (int) ($item['employee_id'] ?? 0);
+                if ($eid <= 0) continue;
+
+                $isAllotted = !empty($item['is_allotted']);
+                $flag = $isAllotted ? 'y' : 'n';
+                $uan = isset($item['uan_no']) && trim((string) $item['uan_no']) !== '' ? trim((string) $item['uan_no']) : null;
+                $esi = isset($item['esi_no']) && trim((string) $item['esi_no']) !== '' ? trim((string) $item['esi_no']) : null;
+                $pan = isset($item['pan_no']) && trim((string) $item['pan_no']) !== '' ? strtoupper(trim((string) $item['pan_no'])) : null;
+                $basic = isset($item['basic_salary']) && $item['basic_salary'] !== '' ? (float) $item['basic_salary'] : 0.0;
+
+                $stmt->execute([
+                    'eid'   => $eid,
+                    'fid'   => $firmId,
+                    'flag'  => $flag,
+                    'uan'   => $uan,
+                    'esi'   => $esi,
+                    'pan'   => $pan,
+                    'basic' => $basic,
+                ]);
+                $updated++;
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Response::error('Failed to save allotments: ' . $e->getMessage(), 500);
+        }
+
+        $typeUpper = strtoupper($type);
+        return Response::success(['updated' => $updated], "Successfully saved {$typeUpper} allotments for {$updated} employee(s).");
     }
 
     /**
