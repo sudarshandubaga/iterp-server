@@ -184,7 +184,7 @@ class TimetableController
         $stmt->execute($params);
         $timetables = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return Response::json(['data' => $timetables]);
+        return Response::success($timetables);
     }
 
     public function show(Request $request, array $routeParams): Response
@@ -204,7 +204,7 @@ class TimetableController
         $timetable = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$timetable) {
-            return Response::json(['error' => 'Timetable not found.'], 404);
+            return Response::error('Timetable not found.', 404);
         }
 
         // Fetch lectures
@@ -228,7 +228,7 @@ class TimetableController
         $astmt->execute(['id' => $id]);
         $timetable['allocations'] = $astmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return Response::json(['data' => $timetable]);
+        return Response::success($timetable);
     }
 
     public function store(Request $request): Response
@@ -246,7 +246,7 @@ class TimetableController
         ]);
 
         if ($validator->fails()) {
-            return Response::json(['errors' => $validator->errors()], 422);
+            return Response::error('Validation failed.', 422, $validator->errors());
         }
 
         $stmt = $pdo->prepare(
@@ -262,7 +262,7 @@ class TimetableController
         ]);
 
         $id = (int) $pdo->lastInsertId();
-        return Response::json(['message' => 'Timetable created successfully.', 'id' => $id], 201);
+        return Response::success(['id' => $id], 'Timetable created successfully.', 201);
     }
 
     public function update(Request $request, array $routeParams): Response
@@ -282,7 +282,7 @@ class TimetableController
         ]);
 
         if ($validator->fails()) {
-            return Response::json(['errors' => $validator->errors()], 422);
+            return Response::error('Validation failed.', 422, $validator->errors());
         }
 
         $stmt = $pdo->prepare(
@@ -304,7 +304,7 @@ class TimetableController
             'status'           => $body['status'] ?? 'active',
         ]);
 
-        return Response::json(['message' => 'Timetable updated successfully.']);
+        return Response::success(['id' => $id], 'Timetable updated successfully.');
     }
 
     public function destroy(Request $request, array $routeParams): Response
@@ -318,7 +318,7 @@ class TimetableController
         );
         $stmt->execute(['id' => $id]);
 
-        return Response::json(['message' => 'Timetable deleted successfully.']);
+        return Response::success(null, 'Timetable deleted successfully.');
     }
 
     // =========================================================================
@@ -339,7 +339,7 @@ class TimetableController
         $stmt->execute(['id' => $timetableId]);
         $lectures = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return Response::json(['data' => $lectures]);
+        return Response::success($lectures);
     }
 
     public function lectureStore(Request $request, array $routeParams): Response
@@ -361,7 +361,7 @@ class TimetableController
         ]);
 
         if ($validator->fails()) {
-            return Response::json(['errors' => $validator->errors()], 422);
+            return Response::error('Validation failed.', 422, $validator->errors());
         }
 
         // Auto determine sort order if not given
@@ -389,7 +389,7 @@ class TimetableController
         ]);
 
         $id = (int) $pdo->lastInsertId();
-        return Response::json(['message' => 'Lecture added successfully.', 'id' => $id], 201);
+        return Response::success(['id' => $id], 'Lecture added successfully.', 201);
     }
 
     public function lectureUpdate(Request $request, array $routeParams): Response
@@ -411,7 +411,7 @@ class TimetableController
         ]);
 
         if ($validator->fails()) {
-            return Response::json(['errors' => $validator->errors()], 422);
+            return Response::error('Validation failed.', 422, $validator->errors());
         }
 
         $stmt = $pdo->prepare(
@@ -437,7 +437,7 @@ class TimetableController
             'sort_order'     => isset($body['sort_order']) ? (int) $body['sort_order'] : null,
         ]);
 
-        return Response::json(['message' => 'Lecture updated successfully.']);
+        return Response::success(null, 'Lecture updated successfully.');
     }
 
     public function lectureDestroy(Request $request, array $routeParams): Response
@@ -451,7 +451,7 @@ class TimetableController
         );
         $stmt->execute(['id' => $lectureId]);
 
-        return Response::json(['message' => 'Lecture deleted successfully.']);
+        return Response::success(null, 'Lecture deleted successfully.');
     }
 
     public function lecturesReorder(Request $request, array $routeParams): Response
@@ -463,7 +463,7 @@ class TimetableController
         $items = $body['items'] ?? []; // [{ id: 1, sort_order: 1 }, ...]
 
         if (!is_array($items)) {
-            return Response::json(['error' => 'Invalid items array.'], 422);
+            return Response::error('Invalid items array.', 422);
         }
 
         $stmt = $pdo->prepare('UPDATE timetable_lectures SET sort_order = :sort WHERE id = :id');
@@ -473,7 +473,7 @@ class TimetableController
             }
         }
 
-        return Response::json(['message' => 'Lectures reordered successfully.']);
+        return Response::success(null, 'Lectures reordered successfully.');
     }
 
     // =========================================================================
@@ -497,7 +497,7 @@ class TimetableController
         $stmt->execute(['id' => $timetableId]);
         $allocations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return Response::json(['data' => $allocations]);
+        return Response::success($allocations);
     }
 
     public function allocationSave(Request $request, array $routeParams): Response
@@ -511,7 +511,7 @@ class TimetableController
         // Expects: { allocations: [ { academic_class_id: 1, section_id: 2 }, ... ] }
         $allocations = $body['allocations'] ?? [];
         if (!is_array($allocations)) {
-            return Response::json(['error' => 'Invalid allocations payload.'], 422);
+            return Response::error('Invalid allocations payload.', 422);
         }
 
         $checkStmt = $pdo->prepare(
@@ -539,7 +539,7 @@ class TimetableController
             }
         }
 
-        return Response::json(['message' => "Successfully allocated {$addedCount} class/section(s)."]);
+        return Response::success(['added_count' => $addedCount], "Successfully allocated {$addedCount} class/section(s).");
     }
 
     public function allocationRemove(Request $request, array $routeParams): Response
@@ -553,7 +553,7 @@ class TimetableController
         );
         $stmt->execute(['id' => $allocationId]);
 
-        return Response::json(['message' => 'Allocation removed successfully.']);
+        return Response::success(null, 'Allocation removed successfully.');
     }
 
     // =========================================================================
@@ -571,7 +571,7 @@ class TimetableController
         $groupId = $request->query('group_id') ? (int) $request->query('group_id') : null;
 
         if ($timetableId <= 0) {
-            return Response::json(['error' => 'Timetable ID is required.'], 422);
+            return Response::error('Timetable ID is required.', 422);
         }
 
         // Fetch timetable details
@@ -580,7 +580,7 @@ class TimetableController
         $timetable = $tstmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$timetable) {
-            return Response::json(['error' => 'Timetable not found.'], 404);
+            return Response::error('Timetable not found.', 404);
         }
 
         // Fetch lectures for this timetable
@@ -638,7 +638,7 @@ class TimetableController
         $subQuery->execute();
         $subjects = $subQuery->fetchAll(PDO::FETCH_ASSOC);
 
-        return Response::json([
+        return Response::success([
             'timetable' => $timetable,
             'lectures'  => $lectures,
             'slots'     => $slots,
@@ -661,7 +661,7 @@ class TimetableController
         $allowClash = !empty($body['allow_clash']);
 
         if ($timetableId <= 0 || $classId <= 0 || $sectionId <= 0) {
-            return Response::json(['error' => 'Timetable, Class, and Section are required.'], 422);
+            return Response::error('Timetable, Class, and Section are required.', 422);
         }
 
         // Validate teacher clashes across other classes
@@ -707,10 +707,7 @@ class TimetableController
         }
 
         if (!empty($clashes) && !$allowClash) {
-            return Response::json([
-                'error'   => 'Teacher schedule clash detected.',
-                'clashes' => $clashes,
-            ], 409);
+            return Response::error('Teacher schedule clash detected.', 409, ['clashes' => $clashes]);
         }
 
         // Transaction to overwrite/save slots for this class and section
@@ -769,13 +766,10 @@ class TimetableController
             }
 
             $pdo->commit();
-            return Response::json([
-                'message'     => "Timetable saved successfully ({$savedCount} periods configured).",
-                'saved_count' => $savedCount,
-            ]);
+            return Response::success(['saved_count' => $savedCount], "Timetable saved successfully ({$savedCount} periods configured).");
         } catch (Throwable $e) {
             $pdo->rollBack();
-            return Response::json(['error' => 'Failed to save timetable slots: ' . $e->getMessage()], 500);
+            return Response::error('Failed to save timetable slots: ' . $e->getMessage(), 500);
         }
     }
 
@@ -791,7 +785,7 @@ class TimetableController
         $sectionId = (int) $request->query('section_id');
 
         if ($teacherId <= 0 || empty($dayOfWeek) || $lectureId <= 0) {
-            return Response::json(['is_busy' => false]);
+            return Response::success(['is_busy' => false]);
         }
 
         $stmt = $pdo->prepare(
@@ -818,7 +812,7 @@ class TimetableController
         $clash = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($clash) {
-            return Response::json([
+            return Response::success([
                 'is_busy' => true,
                 'clash'   => [
                     'teacher_name' => $clash['teacher_name'],
@@ -829,7 +823,7 @@ class TimetableController
             ]);
         }
 
-        return Response::json(['is_busy' => false]);
+        return Response::success(['is_busy' => false]);
     }
 
     // =========================================================================
@@ -846,14 +840,14 @@ class TimetableController
         $dateTo = (string) $request->query('date_to');
 
         if ($teacherId <= 0 || empty($dateFrom) || empty($dateTo)) {
-            return Response::json(['error' => 'Teacher ID, Date From, and Date To are required.'], 422);
+            return Response::error('Teacher ID, Date From, and Date To are required.', 422);
         }
 
         $startDate = new DateTime($dateFrom);
         $endDate = new DateTime($dateTo);
 
         if ($startDate > $endDate) {
-            return Response::json(['error' => 'Date From cannot be after Date To.'], 422);
+            return Response::error('Date From cannot be after Date To.', 422);
         }
 
         // Get teacher profile details
@@ -867,7 +861,7 @@ class TimetableController
         $teacher = $tstmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$teacher) {
-            return Response::json(['error' => 'Teacher not found.'], 404);
+            return Response::error('Teacher not found.', 404);
         }
 
         // Prepared statement to fetch teacher scheduled slots for a given day of the week
@@ -917,7 +911,6 @@ class TimetableController
 
         $days = [];
         $curr = clone $startDate;
-        $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
         while ($curr <= $endDate) {
             $dateStr = $curr->format('Y-m-d');
@@ -978,7 +971,7 @@ class TimetableController
             $curr->modify('+1 day');
         }
 
-        return Response::json([
+        return Response::success([
             'teacher' => $teacher,
             'days'    => $days,
         ]);
@@ -995,7 +988,7 @@ class TimetableController
         $excludeTeacherId = (int) $request->query('exclude_teacher_id');
 
         if (empty($date) || empty($dayOfWeek) || $lectureId <= 0) {
-            return Response::json(['error' => 'Date, Day of Week, and Lecture ID are required.'], 422);
+            return Response::error('Date, Day of Week, and Lecture ID are required.', 422);
         }
 
         // 1. All teaching employees
@@ -1045,7 +1038,7 @@ class TimetableController
         $lstmt->execute(['id' => $lectureId]);
         $lecture = $lstmt->fetch(PDO::FETCH_ASSOC);
 
-        return Response::json([
+        return Response::success([
             'date'          => $date,
             'day_of_week'   => $dayOfWeek,
             'lecture'       => $lecture,
@@ -1073,7 +1066,7 @@ class TimetableController
         ]);
 
         if ($validator->fails()) {
-            return Response::json(['errors' => $validator->errors()], 422);
+            return Response::error('Validation failed.', 422, $validator->errors());
         }
 
         $timetableId = (int) $body['timetable_id'];
@@ -1137,11 +1130,10 @@ class TimetableController
         $nstmt->execute(['id' => $subTeacherId]);
         $subName = $nstmt->fetchColumn() ?: 'Assigned Teacher';
 
-        return Response::json([
-            'message'                  => "Substituted with {$subName} successfully.",
-            'substitution_id'          => $id,
-            'substitute_teacher_name'  => $subName,
-        ], 201);
+        return Response::success([
+            'substitution_id'         => $id,
+            'substitute_teacher_name' => $subName,
+        ], "Substituted with {$subName} successfully.", 201);
     }
 
     public function substitutionCancel(Request $request, array $routeParams): Response
@@ -1157,7 +1149,7 @@ class TimetableController
         );
         $stmt->execute(['id' => $id]);
 
-        return Response::json(['message' => 'Substitution cancelled successfully.']);
+        return Response::success(null, 'Substitution cancelled successfully.');
     }
 
     // =========================================================================
@@ -1173,7 +1165,7 @@ class TimetableController
         $timetableId = $request->query('timetable_id') ? (int) $request->query('timetable_id') : null;
 
         if ($teacherId <= 0) {
-            return Response::json(['error' => 'Please select a teacher.'], 422);
+            return Response::error('Please select a teacher.', 422);
         }
 
         // Fetch teacher info
@@ -1188,7 +1180,7 @@ class TimetableController
         $teacher = $tstmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$teacher) {
-            return Response::json(['error' => 'Teacher not found.'], 404);
+            return Response::error('Teacher not found.', 404);
         }
 
         // Fetch lectures from either the specified timetable or the default active timetable
@@ -1245,7 +1237,7 @@ class TimetableController
             ];
         }
 
-        return Response::json([
+        return Response::success([
             'teacher'       => $teacher,
             'lectures'      => $lectures,
             'days'          => $days,
@@ -1265,7 +1257,7 @@ class TimetableController
         $timetableId = $request->query('timetable_id') ? (int) $request->query('timetable_id') : null;
 
         if ($classId <= 0 || $sectionId <= 0) {
-            return Response::json(['error' => 'Class and Section are required.'], 422);
+            return Response::error('Class and Section are required.', 422);
         }
 
         // Fetch class & section info
@@ -1337,7 +1329,7 @@ class TimetableController
             ];
         }
 
-        return Response::json([
+        return Response::success([
             'class_name'   => $className,
             'section_name' => $sectionName,
             'group_name'   => $groupName,
@@ -1415,10 +1407,9 @@ class TimetableController
         $stmt->execute($params);
         $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return Response::json([
+        return Response::success([
             'records' => $records,
             'total'   => count($records),
         ]);
     }
 }
-
