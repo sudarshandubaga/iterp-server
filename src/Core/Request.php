@@ -63,6 +63,11 @@ class Request
         return array_merge($this->query, $this->post, $this->json);
     }
 
+    public function body(): array
+    {
+        return $this->all();
+    }
+
     public function query(string $key, $default = null)
     {
         return $this->query[$key] ?? $default;

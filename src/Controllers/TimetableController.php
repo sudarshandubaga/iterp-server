@@ -236,7 +236,7 @@ class TimetableController
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $body = $request->body();
+        $body = $request->all();
         $validator = new Validator($body, [
             'academic_year_id' => 'required|integer',
             'name'             => 'required|string|max:255',
@@ -271,7 +271,7 @@ class TimetableController
         self::ensureTables($pdo);
 
         $id = (int) ($routeParams['id'] ?? 0);
-        $body = $request->body();
+        $body = $request->all();
 
         $validator = new Validator($body, [
             'academic_year_id' => 'nullable|integer',
@@ -348,7 +348,7 @@ class TimetableController
         self::ensureTables($pdo);
 
         $timetableId = (int) ($routeParams['id'] ?? 0);
-        $body = $request->body();
+        $body = $request->all();
 
         $validator = new Validator($body, [
             'lecture_name'   => 'required|string|max:100',
@@ -398,7 +398,7 @@ class TimetableController
         self::ensureTables($pdo);
 
         $lectureId = (int) ($routeParams['lectureId'] ?? $routeParams['id'] ?? 0);
-        $body = $request->body();
+        $body = $request->all();
 
         $validator = new Validator($body, [
             'lecture_name'   => 'required|string|max:100',
@@ -459,7 +459,7 @@ class TimetableController
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $body = $request->body();
+        $body = $request->all();
         $items = $body['items'] ?? []; // [{ id: 1, sort_order: 1 }, ...]
 
         if (!is_array($items)) {
@@ -506,7 +506,7 @@ class TimetableController
         self::ensureTables($pdo);
 
         $timetableId = (int) ($routeParams['id'] ?? 0);
-        $body = $request->body();
+        $body = $request->all();
 
         // Expects: { allocations: [ { academic_class_id: 1, section_id: 2 }, ... ] }
         $allocations = $body['allocations'] ?? [];
@@ -652,7 +652,7 @@ class TimetableController
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $body = $request->body();
+        $body = $request->all();
         $timetableId = (int) ($body['timetable_id'] ?? 0);
         $classId = (int) ($body['academic_class_id'] ?? 0);
         $sectionId = (int) ($body['section_id'] ?? 0);
@@ -1052,7 +1052,7 @@ class TimetableController
         $pdo = Database::pdo();
         self::ensureTables($pdo);
 
-        $body = $request->body();
+        $body = $request->all();
         $validator = new Validator($body, [
             'timetable_id'          => 'required|integer',
             'substitution_date'     => 'required|date',
