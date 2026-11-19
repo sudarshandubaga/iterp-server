@@ -628,7 +628,7 @@ class TimetableController
             $sql = "SELECT s.*, 
                            sub.name AS subject_name_resolved,
                            sub.code AS subject_code,
-                           u.name AS teacher_name,
+                           TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS teacher_name,
                            u.mobile_no AS teacher_phone,
                            emp.employee_type
                     FROM timetable_slots s
@@ -644,11 +644,13 @@ class TimetableController
 
         // Available teachers (employee_type = 'Teaching')
         $tQuery = $pdo->prepare(
-            'SELECT e.id, u.name, u.mobile_no, e.attendance_code, e.employee_type
+            "SELECT e.id, 
+                    TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS name, 
+                    u.mobile_no, e.attendance_code, e.employee_type
              FROM employees e
              JOIN users u ON u.id = e.user_id
              WHERE e.deleted_at IS NULL AND u.deleted_at IS NULL
-             ORDER BY u.name ASC'
+             ORDER BY u.first_name ASC, u.last_name ASC"
         );
         $tQuery->execute();
         $teachers = $tQuery->fetchAll(PDO::FETCH_ASSOC);
@@ -689,7 +691,8 @@ class TimetableController
         // Validate teacher clashes across other classes
         $clashes = [];
         $clashCheckStmt = $pdo->prepare(
-            'SELECT s.*, c.name AS class_name, sec.name AS section_name, lec.lecture_name, u.name AS teacher_name
+            "SELECT s.*, c.name AS class_name, sec.name AS section_name, lec.lecture_name, 
+                    TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS teacher_name
              FROM timetable_slots s
              JOIN academic_classes c ON c.id = s.academic_class_id
              JOIN sections sec ON sec.id = s.section_id
@@ -700,7 +703,7 @@ class TimetableController
                AND s.day_of_week = :day_of_week
                AND s.lecture_id = :lecture_id
                AND (s.academic_class_id != :cls_id OR s.section_id != :sec_id)
-               AND s.deleted_at IS NULL'
+               AND s.deleted_at IS NULL"
         );
 
         foreach ($slots as $slot) {
@@ -811,7 +814,8 @@ class TimetableController
         }
 
         $stmt = $pdo->prepare(
-            'SELECT s.*, c.name AS class_name, sec.name AS section_name, lec.lecture_name, u.name AS teacher_name
+            "SELECT s.*, c.name AS class_name, sec.name AS section_name, lec.lecture_name, 
+                    TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS teacher_name
              FROM timetable_slots s
              JOIN academic_classes c ON c.id = s.academic_class_id
              JOIN sections sec ON sec.id = s.section_id
@@ -822,7 +826,7 @@ class TimetableController
                AND s.day_of_week = :day_of_week
                AND s.lecture_id = :lecture_id
                AND (s.academic_class_id != :cls_id OR s.section_id != :sec_id)
-               AND s.deleted_at IS NULL'
+               AND s.deleted_at IS NULL"
         );
         $stmt->execute([
             'teacher_id'  => $teacherId,
@@ -874,10 +878,12 @@ class TimetableController
 
         // Get teacher profile details
         $tstmt = $pdo->prepare(
-            'SELECT e.id, u.name, u.mobile_no, e.attendance_code, e.employee_type
+            "SELECT e.id, 
+                    TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS name, 
+                    u.mobile_no, e.attendance_code, e.employee_type
              FROM employees e
              JOIN users u ON u.id = e.user_id
-             WHERE e.id = :id AND e.deleted_at IS NULL'
+             WHERE e.id = :id AND e.deleted_at IS NULL"
         );
         $tstmt->execute(['id' => $teacherId]);
         $teacher = $tstmt->fetch(PDO::FETCH_ASSOC);
@@ -914,8 +920,8 @@ class TimetableController
 
         // Prepared statement to check existing substitutions on a specific date and slot/lecture
         $substStmt = $pdo->prepare(
-            'SELECT sub.*, 
-                    u.name AS substitute_teacher_name, 
+            "SELECT sub.*, 
+                    TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS substitute_teacher_name, 
                     u.mobile_no AS substitute_teacher_phone,
                     emp.employee_type AS substitute_employee_type
              FROM timetable_substitutions sub
@@ -927,8 +933,8 @@ class TimetableController
                AND sub.academic_class_id = :cls_id
                AND sub.section_id = :sec_id
                AND sub.deleted_at IS NULL
-               AND sub.status != "cancelled"
-             ORDER BY sub.id DESC LIMIT 1'
+               AND sub.status != 'cancelled'
+             ORDER BY sub.id DESC LIMIT 1"
         );
 
         $days = [];
@@ -1015,7 +1021,7 @@ class TimetableController
 
         // 1. All teaching employees
         $sql = "SELECT e.id AS teacher_id, 
-                       u.name, 
+                       TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS name, 
                        u.mobile_no, 
                        e.attendance_code, 
                        e.employee_type,
@@ -1043,7 +1049,7 @@ class TimetableController
                         AND sub.deleted_at IS NULL 
                         AND sub.status != 'cancelled'
                   )
-                ORDER BY u.name ASC";
+                ORDER BY u.first_name ASC, u.last_name ASC";
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -1148,7 +1154,7 @@ class TimetableController
         $id = (int) $pdo->lastInsertId();
 
         // Fetch substitute teacher name for quick UI response
-        $nstmt = $pdo->prepare('SELECT u.name FROM employees e JOIN users u ON u.id = e.user_id WHERE e.id = :id');
+        $nstmt = $pdo->prepare("SELECT TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) FROM employees e JOIN users u ON u.id = e.user_id WHERE e.id = :id");
         $nstmt->execute(['id' => $subTeacherId]);
         $subName = $nstmt->fetchColumn() ?: 'Assigned Teacher';
 
@@ -1193,11 +1199,13 @@ class TimetableController
 
         // Fetch teacher info
         $tstmt = $pdo->prepare(
-            'SELECT e.id, u.name, u.mobile_no, e.attendance_code, e.employee_type,
+            "SELECT e.id, 
+                    TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS name, 
+                    u.mobile_no, e.attendance_code, e.employee_type,
                     (SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id LIMIT 1) AS designation
              FROM employees e
              JOIN users u ON u.id = e.user_id
-             WHERE e.id = :id AND e.deleted_at IS NULL'
+             WHERE e.id = :id AND e.deleted_at IS NULL"
         );
         $tstmt->execute(['id' => $teacherId]);
         $teacher = $tstmt->fetch(PDO::FETCH_ASSOC);
@@ -1322,15 +1330,15 @@ class TimetableController
         $lectures = $lstmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Fetch slots
-        $slotSql = 'SELECT s.*, 
-                           u.name AS teacher_name,
+        $slotSql = "SELECT s.*, 
+                           TRIM(CONCAT_WS(' ', u.first_name, NULLIF(u.middle_name, ''), u.last_name)) AS teacher_name,
                            sub.name AS subject_name_resolved,
                            sub.code AS subject_code
                     FROM timetable_slots s
                     LEFT JOIN employees emp ON emp.id = s.teacher_id
                     LEFT JOIN users u ON u.id = emp.user_id
                     LEFT JOIN exam_subjects sub ON sub.id = s.subject_id
-                    WHERE s.academic_class_id = :cls_id AND s.section_id = :sec_id AND s.deleted_at IS NULL';
+                    WHERE s.academic_class_id = :cls_id AND s.section_id = :sec_id AND s.deleted_at IS NULL";
         $slotParams = ['cls_id' => $classId, 'sec_id' => $sectionId];
 
         if ($groupId !== null) {
@@ -1409,9 +1417,9 @@ class TimetableController
                        sec.name AS section_name,
                        g.name AS group_name,
                        es.name AS subject_name_resolved,
-                       u1.name AS original_teacher_name,
+                       TRIM(CONCAT_WS(' ', u1.first_name, NULLIF(u1.middle_name, ''), u1.last_name)) AS original_teacher_name,
                        u1.mobile_no AS original_teacher_phone,
-                       u2.name AS substitute_teacher_name,
+                       TRIM(CONCAT_WS(' ', u2.first_name, NULLIF(u2.middle_name, ''), u2.last_name)) AS substitute_teacher_name,
                        u2.mobile_no AS substitute_teacher_phone
                 FROM timetable_substitutions sub
                 JOIN timetable_lectures lec ON lec.id = sub.lecture_id
