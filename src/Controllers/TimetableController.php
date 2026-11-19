@@ -144,7 +144,7 @@ class TimetableController
 
     public function index(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $academicYearId = $request->query('academic_year_id');
@@ -189,7 +189,7 @@ class TimetableController
 
     public function show(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $id = (int) ($routeParams['id'] ?? 0);
@@ -233,7 +233,7 @@ class TimetableController
 
     public function store(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $body = $request->body();
@@ -267,7 +267,7 @@ class TimetableController
 
     public function update(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $id = (int) ($routeParams['id'] ?? 0);
@@ -309,7 +309,7 @@ class TimetableController
 
     public function destroy(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $id = (int) ($routeParams['id'] ?? 0);
@@ -327,7 +327,7 @@ class TimetableController
 
     public function lecturesList(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $timetableId = (int) ($routeParams['id'] ?? 0);
@@ -344,7 +344,7 @@ class TimetableController
 
     public function lectureStore(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $timetableId = (int) ($routeParams['id'] ?? 0);
@@ -394,7 +394,7 @@ class TimetableController
 
     public function lectureUpdate(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $lectureId = (int) ($routeParams['lectureId'] ?? $routeParams['id'] ?? 0);
@@ -442,7 +442,7 @@ class TimetableController
 
     public function lectureDestroy(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $lectureId = (int) ($routeParams['lectureId'] ?? $routeParams['id'] ?? 0);
@@ -456,7 +456,7 @@ class TimetableController
 
     public function lecturesReorder(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $body = $request->body();
@@ -482,7 +482,7 @@ class TimetableController
 
     public function allocationsList(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $timetableId = (int) ($routeParams['id'] ?? 0);
@@ -502,7 +502,7 @@ class TimetableController
 
     public function allocationSave(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $timetableId = (int) ($routeParams['id'] ?? 0);
@@ -544,7 +544,7 @@ class TimetableController
 
     public function allocationRemove(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $allocationId = (int) ($routeParams['allocationId'] ?? $routeParams['id'] ?? 0);
@@ -562,7 +562,7 @@ class TimetableController
 
     public function gridGet(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $timetableId = (int) $request->query('timetable_id');
@@ -649,7 +649,7 @@ class TimetableController
 
     public function gridSave(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $body = $request->body();
@@ -781,7 +781,7 @@ class TimetableController
 
     public function checkClashes(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $teacherId = (int) $request->query('teacher_id');
@@ -838,7 +838,7 @@ class TimetableController
 
     public function teacherSchedule(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $teacherId = (int) $request->query('teacher_id');
@@ -986,7 +986,7 @@ class TimetableController
 
     public function freeTeachers(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $date = (string) $request->query('date');
@@ -1056,7 +1056,7 @@ class TimetableController
 
     public function substitutionSave(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $body = $request->body();
@@ -1146,7 +1146,7 @@ class TimetableController
 
     public function substitutionCancel(Request $request, array $routeParams): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $id = (int) ($routeParams['id'] ?? 0);
@@ -1166,7 +1166,7 @@ class TimetableController
 
     public function reportTeacherWise(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $teacherId = (int) $request->query('teacher_id');
@@ -1256,7 +1256,7 @@ class TimetableController
 
     public function reportGroupWise(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $classId = (int) $request->query('academic_class_id');
@@ -1349,7 +1349,7 @@ class TimetableController
 
     public function reportSubstitution(Request $request): Response
     {
-        $pdo = Database::connection();
+        $pdo = Database::pdo();
         self::ensureTables($pdo);
 
         $dateFrom = $request->query('date_from');

@@ -23,6 +23,11 @@ class Database
         return self::$pdo;
     }
 
+    public static function connection(): PDO
+    {
+        return self::pdo();
+    }
+
     private static function makeConnection(bool $loadDatabase = true): PDO
     {
         $config = config('database.connections.' . config('database.default'), []);
